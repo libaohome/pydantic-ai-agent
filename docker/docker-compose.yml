@@ -1,0 +1,37 @@
+version: "3.9"
+
+services:
+  agent-api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - APP_ENV=production
+      - DEFAULT_MODEL=deepseek:deepseek-chat
+      - DATABASE_URL=sqlite+aiosqlite:///./data/agent.db
+    env_file:
+      - ../.env
+    volumes:
+      - agent-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ─── 可选：Ollama 本地模型 ────────────────
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    profiles:
+      - local-llm
+
+volumes:
+  agent-data:
+  ollama-data:

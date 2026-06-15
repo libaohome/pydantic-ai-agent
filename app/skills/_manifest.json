@@ -1,0 +1,38 @@
+{
+  "weather": {
+    "name": "weather",
+    "version": "1.0.0",
+    "author": "unknown",
+    "category": "general",
+    "uploaded_at": "2026-06-15T18:42:47.222655",
+    "uploaded_by": "anonymous",
+    "file_count": 3,
+    "has_scripts": false,
+    "has_resources": false,
+    "checksum": "ed9fe28116930928"
+  },
+  "test-skill": {
+    "name": "test-skill",
+    "version": "1.0.0",
+    "author": "tester",
+    "category": "test",
+    "uploaded_at": "2026-06-15T18:45:48.426910",
+    "uploaded_by": "tester",
+    "file_count": 3,
+    "has_scripts": true,
+    "has_resources": true,
+    "checksum": "65873e70d5950b19"
+  },
+  "image-forgery-detector": {
+    "name": "image-forgery-detector",
+    "version": "1.0.0",
+    "author": "unknown",
+    "category": "general",
+    "uploaded_at": "2026-06-15T19:39:05.086309",
+    "uploaded_by": "anonymous",
+    "file_count": 2,
+    "has_scripts": true,
+    "has_resources": false,
+    "checksum": "8fe3a7d94285d093"
+  }
+}

@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# 环境
+.env
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+*.swp
+*.swo
+
+# 数据
+data/
+*.db
+
+# 日志
+*.log
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 测试
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# MyPy
+.mypy_cache/
+mcp_servers/__init__.py
