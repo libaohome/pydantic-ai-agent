@@ -125,6 +125,7 @@ class AgentDeps:
         user_id: 当前用户标识。
         db_session: 可选的数据库会话，用于工具内持久化数据。
         request_id: 请求追踪 ID，便于日志关联。
+        file_ids: 本次请求关联的上传文件 ID 列表（对应 data/upload 下文件名）。
         metadata: 任意附加元数据的字典。
     """
 
@@ -133,5 +134,6 @@ class AgentDeps:
     # ``X | None`` 是 Python 3.10+ 的可选类型写法，等价于 ``Optional[X]``
     db_session: AsyncSession | None = None
     request_id: str = ""
+    file_ids: list[str] = field(default_factory=list)
     # ``field(default_factory=dict)``：每个实例独立创建新 dict，避免可变默认参数陷阱
     metadata: dict = field(default_factory=dict)

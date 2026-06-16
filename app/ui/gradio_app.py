@@ -19,6 +19,7 @@ Gradio Web 管理控制台模块。
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from pathlib import Path
@@ -31,12 +32,15 @@ from app.agents.registry import AgentName, list_agents
 from app.api.routes import _run_agent
 from app.core.config import get_settings
 from app.core.llm import MODEL_REGISTRY, get_llm_manager
+from app.core.uploads import get_upload_store
 from app.graphs.workflow import RouterNode, WorkflowState, agent_workflow
 from app.skills.routes import get_skill_manager
 
 # Gradio 6 Chatbot 单条消息与历史记录的类型别名
 ChatMessage = dict[str, str]
 ChatHistory = list[ChatMessage]
+MultimodalInput = str | dict[str, Any] | None
+EMPTY_MULTIMODAL_INPUT: dict[str, str | list] = {"text": "", "files": []}
 
 # 下拉框显示名 → 内部 agent 标识
 AGENT_CHOICES: list[tuple[str, str]] = [
@@ -51,6 +55,8 @@ MODEL_CHOICES: list[str] = list(MODEL_REGISTRY.keys())
 
 # 反向映射：界面标签 → agent value
 AGENT_LABELS = {label: value for label, value in AGENT_CHOICES}
+
+logger = logging.getLogger(__name__)
 
 
 # ─── 格式化工具 ──────────────────────────────────
@@ -129,10 +135,85 @@ def _format_run_meta(result: dict[str, Any]) -> str:
     )
 
 
+def _resolve_gradio_file_ref(item: Any) -> tuple[str, str] | None:
+    """从 Gradio MultimodalTextbox 的 files 项解析本地路径与原始文件名。
+
+    Gradio 6 preprocess 后 files 通常是路径字符串列表，而非 dict。
+    """
+    path: str | None = None
+    orig_name: str | None = None
+
+    if isinstance(item, str):
+        path = item
+    elif isinstance(item, dict):
+        path = item.get("path") or item.get("url")
+        orig_name = item.get("orig_name")
+    else:
+        path = getattr(item, "path", None) or getattr(item, "url", None)
+        orig_name = getattr(item, "orig_name", None)
+
+    if not path:
+        return None
+
+    local = Path(path)
+    if not local.is_file():
+        local = local.resolve()
+    if not local.is_file():
+        logger.warning("Gradio upload path is not a readable file: %s", path)
+        return None
+
+    return str(local), orig_name or local.name
+
+
+def _save_multimodal_uploads(value: MultimodalInput) -> tuple[str, list[str]]:
+    """解析 MultimodalTextbox 输入，将附件保存到 data/upload 并返回 file_id 列表。"""
+    if value is None:
+        return "", []
+    if isinstance(value, str):
+        return value.strip(), []
+
+    text = str(value.get("text") or "").strip()
+    raw_files = value.get("files") or []
+    store = get_upload_store()
+    file_ids: list[str] = []
+
+    for item in raw_files:
+        resolved = _resolve_gradio_file_ref(item)
+        if not resolved:
+            continue
+        path, orig_name = resolved
+        try:
+            file_ids.append(store.save_from_path(path, orig_name))
+        except (FileNotFoundError, OSError) as e:
+            logger.warning("Failed to persist upload %s: %s", path, e)
+
+    return text, file_ids
+
+
+def _format_user_message(text: str, file_ids: list[str]) -> str:
+    """在对话历史中展示用户消息（含附件摘要）。"""
+    if not file_ids:
+        return text
+
+    store = get_upload_store()
+    names: list[str] = []
+    for file_id in file_ids:
+        try:
+            names.append(store.get_metadata(file_id).original_name)
+        except FileNotFoundError:
+            names.append(file_id)
+
+    attachment = ", ".join(names)
+    if text:
+        return f"{text}\n\n📎 附件: {attachment}"
+    return f"📎 附件: {attachment}"
+
+
 async def _run_chat_agent(
     message: str,
     agent_value: str,
     model_alias: str | None,
+    file_ids: list[str] | None = None,
 ) -> str:
     """
     执行一次 Chat/Agent 调用，返回 Markdown 字符串。
@@ -141,14 +222,16 @@ async def _run_chat_agent(
             message: 用户输入
             agent_value: 内部 agent 名或 "workflow"
             model_alias: 模型别名，None 则用各 Agent 默认模型
+            file_ids: 可选的上传文件 ID 列表
 
     workflow 模式走 LangGraph 工作流，其余走 _run_agent。
     """
     model = model_alias if model_alias else None
+    ids = file_ids or []
 
     if agent_value == "workflow":
         start = time.time()
-        state = WorkflowState(user_input=message)
+        state = WorkflowState(user_input=message, file_ids=ids)
         result = await agent_workflow.run(start_node=RouterNode(), state=state)
         ws = result.state
         elapsed = round(time.time() - start, 3)
@@ -169,6 +252,7 @@ async def _run_chat_agent(
         agent_name,
         user_input=message,
         model_alias=model,
+        file_ids=ids,
     )
     if result["status"] == "error":
         return f"❌ **错误:** {result['error']}{_format_run_meta(result)}"
@@ -366,32 +450,34 @@ async def run_agent_test(
 # ─── Chat 管理 ───────────────────────────────────
 
 async def chat_submit(
-    message: str,
+    message: MultimodalInput,
     history: ChatHistory,
     agent_label: str,
     model_alias: str | None,
-) -> tuple[ChatHistory, str]:
+) -> tuple[ChatHistory, MultimodalInput]:
     """
-    发送聊天消息：追加 user/assistant 两条记录，并清空输入框。
+    发送聊天消息：保存附件、追加 user/assistant 两条记录，并清空输入框。
 
     Gradio 要求返回 (更新后的 history, 清空的 input)。
     """
-    if not message.strip():
-        return history, ""
+    text, file_ids = _save_multimodal_uploads(message)
+    if not text and not file_ids:
+        return history, EMPTY_MULTIMODAL_INPUT
 
     agent_value = AGENT_LABELS.get(agent_label, "qa-assistant")
-    reply = await _run_chat_agent(message, agent_value, model_alias)
+    reply = await _run_chat_agent(text, agent_value, model_alias, file_ids=file_ids)
+    display_message = _format_user_message(text, file_ids)
     history = [
         *history,
-        {"role": "user", "content": message},
+        {"role": "user", "content": display_message},
         {"role": "assistant", "content": reply},
     ]
-    return history, ""
+    return history, EMPTY_MULTIMODAL_INPUT
 
 
-def clear_chat() -> tuple[ChatHistory, str, str]:
+def clear_chat() -> tuple[ChatHistory, MultimodalInput, str]:
     """清空对话历史与导出框。"""
-    return [], "", ""
+    return [], EMPTY_MULTIMODAL_INPUT, ""
 
 
 def export_chat(history: ChatHistory, session_name: str) -> str:
@@ -441,9 +527,16 @@ def create_gradio_demo() -> gr.Blocks:
                     )
                 chatbot = gr.Chatbot(label="对话", height=420)
                 with gr.Row():
-                    chat_input = gr.Textbox(
+                    chat_input = gr.MultimodalTextbox(
                         label="输入消息",
-                        placeholder="输入问题或指令，Enter 发送...",
+                        placeholder="输入问题或指令，可上传附件...",
+                        file_types=[
+                            ".py", ".java", ".kt", ".go", ".js", ".ts", ".txt", ".md",
+                            ".json", ".csv", ".xml", ".yaml", ".yml", ".sql", ".png",
+                            ".jpg", ".jpeg", ".webp", ".zip",
+                        ],
+                        file_count="multiple",
+                        sources=["upload"],
                         scale=4,
                     )
                     chat_send = gr.Button("发送", variant="primary", scale=1)

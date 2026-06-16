@@ -32,21 +32,34 @@ _NO_CODE_HINT = (
 )
 
 
-def prepare_review_input(user_input: str) -> str:
+def prepare_review_input(user_input: str, file_ids: list[str] | None = None) -> str:
     """预处理审查输入：无具体代码时引导 Agent 直接作答。
 
     若用户只问了方法论（如「Spring Boot 项目审查要点」）而没有贴代码，
     则在输入末尾追加 ``_NO_CODE_HINT``，避免 Agent 盲目调用 Shell 类工具。
+    若附带 ``file_ids``，则注入附件说明；可在下方预留区预读文件内容。
 
     Args:
         user_input: 用户原始输入文本。
+        file_ids: 可选的上传文件 ID 列表。
 
     Returns:
         原样返回或追加提示后的输入字符串。
     """
+    from app.agents.input_files import enrich_user_input_with_files
+
     text = user_input.strip()  # 去掉首尾空白
+    if file_ids:
+        # 预留：按 file_id 预读附件并注入上下文（默认仅附加 file_id 说明）
+        # file_contents = read_uploaded_files(file_ids)
+        user_input = enrich_user_input_with_files(user_input, file_ids)
+        text = user_input.strip()
+
     if not text:
         return user_input  # 空输入直接返回，不做处理
+
+    if file_ids:
+        return user_input
 
     # 检测 Markdown 代码块标记
     has_code_block = "```" in text

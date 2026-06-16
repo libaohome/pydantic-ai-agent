@@ -35,8 +35,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent  # app/
 PROJECT_ROOT = BASE_DIR.parent                      # 项目根目录
 ENV_FILE = PROJECT_ROOT / ".env"                    # ``/`` 是 Path 的路径拼接运算符
 DATA_DIR = PROJECT_ROOT / "data"
+UPLOAD_DIR = DATA_DIR / "upload"
 # ``mkdir(exist_ok=True)``：目录不存在则创建，已存在不报错
 DATA_DIR.mkdir(exist_ok=True)
+UPLOAD_DIR.mkdir(exist_ok=True)
 
 # pydantic-ai 的 provider 直接从 os.environ 读取 API Key，字段名必须是大写环境变量名
 # 元组列表：每项是 (环境变量名, AppSettings 字段名) 的映射

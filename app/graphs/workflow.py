@@ -15,7 +15,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass  # dataclass 装饰器：简化数据类的定义
+from dataclasses import dataclass, field  # dataclass 装饰器：简化数据类的定义
 from typing import Literal  # Literal：字面量类型，限制值为固定几个选项
 
 import logfire
@@ -79,6 +79,7 @@ class WorkflowState:
     user_input: str = ""       # 用户原始输入
     tenant_id: str = "default" # 租户 ID
     user_id: str = "anonymous" # 用户 ID
+    file_ids: list[str] = field(default_factory=list)  # 上传文件 ID 列表
     # 各阶段结果（JSON 字符串形式，由对应 Agent 的 model_dump_json() 填充）
     analysis_result: str = ""
     review_result: str = ""
@@ -140,14 +141,18 @@ class AnalyzeNode(BaseNode[WorkflowState]):
             End(ctx.state)：携带更新后状态的终止节点。
         """
         with logfire.span("analyze_node"):
+            from app.agents.data_analyst import prepare_analysis_input
+
             agent = get_agent(AgentName.data_analyst)
             deps = AgentDeps(
                 tenant_id=ctx.state.tenant_id,
                 user_id=ctx.state.user_id,
+                file_ids=ctx.state.file_ids,
             )
 
             try:
-                result = await agent.run(ctx.state.user_input, deps=deps)
+                prompt = prepare_analysis_input(ctx.state.user_input, ctx.state.file_ids)
+                result = await agent.run(prompt, deps=deps)
                 # model_dump_json()：Pydantic 模型转 JSON 字符串，便于存入 state
                 ctx.state.analysis_result = result.output.model_dump_json()
             except Exception as e:
@@ -170,14 +175,18 @@ class ReviewNode(BaseNode[WorkflowState]):
             End(ctx.state)：携带更新后状态的终止节点。
         """
         with logfire.span("review_node"):
+            from app.agents.code_reviewer import prepare_review_input
+
             agent = get_agent(AgentName.code_reviewer)
             deps = AgentDeps(
                 tenant_id=ctx.state.tenant_id,
                 user_id=ctx.state.user_id,
+                file_ids=ctx.state.file_ids,
             )
 
             try:
-                result = await agent.run(ctx.state.user_input, deps=deps)
+                prompt = prepare_review_input(ctx.state.user_input, ctx.state.file_ids)
+                result = await agent.run(prompt, deps=deps)
                 ctx.state.review_result = result.output.model_dump_json()
             except Exception as e:
                 ctx.state.error = str(e)
@@ -199,14 +208,18 @@ class QaNode(BaseNode[WorkflowState]):
             End(ctx.state)：携带更新后状态的终止节点。
         """
         with logfire.span("qa_node"):
+            from app.agents.qa_assistant import prepare_qa_input
+
             agent = get_agent(AgentName.qa_assistant)
             deps = AgentDeps(
                 tenant_id=ctx.state.tenant_id,
                 user_id=ctx.state.user_id,
+                file_ids=ctx.state.file_ids,
             )
 
             try:
-                result = await agent.run(ctx.state.user_input, deps=deps)
+                prompt = prepare_qa_input(ctx.state.user_input, ctx.state.file_ids)
+                result = await agent.run(prompt, deps=deps)
                 ctx.state.qa_result = result.output.model_dump_json()
             except Exception as e:
                 ctx.state.error = str(e)

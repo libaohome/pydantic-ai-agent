@@ -42,12 +42,35 @@ router = APIRouter(prefix="/agents", tags=["agents"])
 
 # ─── 通用运行函数 ────────────────────────────────
 
+def _prepare_agent_input(
+    agent_name: AgentName,
+    user_input: str,
+    file_ids: list[str] | None = None,
+) -> str:
+    """按 Agent 类型预处理用户输入，注入 file_ids 附件说明。"""
+    ids = file_ids or []
+    if agent_name == AgentName.code_reviewer:
+        from app.agents.code_reviewer import prepare_review_input
+
+        return prepare_review_input(user_input, file_ids=ids or None)
+    if agent_name == AgentName.data_analyst:
+        from app.agents.data_analyst import prepare_analysis_input
+
+        return prepare_analysis_input(user_input, file_ids=ids or None)
+    if agent_name == AgentName.qa_assistant:
+        from app.agents.qa_assistant import prepare_qa_input
+
+        return prepare_qa_input(user_input, file_ids=ids or None)
+    return user_input
+
+
 async def _run_agent(
     agent_name: AgentName,
     user_input: str,
     tenant_id: str = "default",
     user_id: str = "anonymous",
     model_alias: str | None = None,
+    file_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """运行指定 Agent 并返回结果与元数据。
 
@@ -60,6 +83,7 @@ async def _run_agent(
         tenant_id: 租户 ID，用于多租户隔离，默认 "default"。
         user_id: 用户 ID，默认 "anonymous"。
         model_alias: 可选的模型别名，传入时会动态替换 Agent 使用的模型。
+        file_ids: 可选的上传文件 ID 列表，对应 data/upload 下存储文件名。
 
     Returns:
         包含 request_id、output、usage、cost_usd、elapsed_seconds、status 等字段的字典。
@@ -78,11 +102,7 @@ async def _run_agent(
     ):
         agent = get_agent(agent_name)  # 从注册表获取 Agent 实例
 
-        # 代码审查 Agent 需要特殊预处理：无代码时追加提示，避免盲目调工具
-        if agent_name == AgentName.code_reviewer:
-            from app.agents.code_reviewer import prepare_review_input
-
-            user_input = prepare_review_input(user_input)
+        user_input = _prepare_agent_input(agent_name, user_input, file_ids)
 
         # 动态切换模型：请求参数中指定了 model_alias 时覆盖 Agent 默认模型
         if model_alias:
@@ -102,6 +122,7 @@ async def _run_agent(
             tenant_id=tenant_id,
             user_id=user_id,
             request_id=request_id,
+            file_ids=file_ids or [],
         )
 
         try:
@@ -190,6 +211,7 @@ async def code_review(
         tenant_id=tenant_id,
         user_id=user_id,
         model_alias=model,
+        file_ids=body.file_ids,
     )
     if result["status"] == "error":
         raise HTTPException(500, result["error"])
@@ -227,6 +249,7 @@ async def data_analysis(
         tenant_id=tenant_id,
         user_id=user_id,
         model_alias=model,
+        file_ids=body.file_ids,
     )
     if result["status"] == "error":
         raise HTTPException(500, result["error"])
@@ -264,6 +287,7 @@ async def qa(
         tenant_id=tenant_id,
         user_id=user_id,
         model_alias=model,
+        file_ids=body.file_ids,
     )
     if result["status"] == "error":
         raise HTTPException(500, result["error"])
@@ -277,6 +301,7 @@ async def run_workflow(
     user_input: str,
     tenant_id: str = "default",
     user_id: str = "anonymous",
+    file_ids: list[str] | None = None,
 ):
     """运行图编排工作流，自动路由到合适的 Agent。
 
@@ -287,6 +312,7 @@ async def run_workflow(
         user_input: 用户自然语言输入（查询参数）。
         tenant_id: 租户 ID。
         user_id: 用户 ID。
+        file_ids: 可选的上传文件 ID 列表。
 
     Returns:
         包含 elapsed_seconds 和 state（各阶段结果摘要，最多 500 字符）的 JSON。
@@ -299,6 +325,7 @@ async def run_workflow(
         user_input=user_input,
         tenant_id=tenant_id,
         user_id=user_id,
+        file_ids=file_ids or [],
     )
 
     # 从 RouterNode 开始执行图；run 返回包含最终 state 的结果对象

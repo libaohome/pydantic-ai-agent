@@ -23,6 +23,16 @@ from app.models.schemas import QaOutput
 from app.skills.integration import create_skills_toolset  # 创建 Skills 工具集工厂函数
 
 
+def prepare_qa_input(user_input: str, file_ids: list[str] | None = None) -> str:
+    """预处理问答输入；附带 file_ids 时注入附件说明。
+
+    预留：可调用 ``read_uploaded_files(file_ids)`` 预读文本附件。
+    """
+    from app.agents.input_files import enrich_user_input_with_files
+
+    return enrich_user_input_with_files(user_input, file_ids)
+
+
 # ─── Agent 定义 ──────────────────────────────────
 
 qa_agent = Agent[AgentDeps, QaOutput](

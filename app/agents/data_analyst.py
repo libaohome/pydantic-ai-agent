@@ -21,6 +21,16 @@ from app.core.llm import get_llm_manager
 from app.models.schemas import DataAnalysisOutput
 
 
+def prepare_analysis_input(user_input: str, file_ids: list[str] | None = None) -> str:
+    """预处理数据分析输入；附带 file_ids 时注入附件说明。
+
+    预留：可调用 ``read_uploaded_files(file_ids)`` 读取 CSV 等数据文件。
+    """
+    from app.agents.input_files import enrich_user_input_with_files
+
+    return enrich_user_input_with_files(user_input, file_ids)
+
+
 # ─── Agent 定义 ──────────────────────────────────
 
 data_analysis_agent = Agent[AgentDeps, DataAnalysisOutput](

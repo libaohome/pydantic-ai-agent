@@ -49,11 +49,13 @@ class CodeReviewInput(BaseModel):
         code: 待审查的源代码文本。
         language: 编程语言标识，默认 python。
         context: 额外上下文，如 PR 描述、需求说明。
+        file_ids: 可选的上传文件 ID 列表（data/upload 目录下文件名）。
     """
 
     code: str = Field(description="待审查的源代码")
     language: str = Field(default="python", description="编程语言")
     context: str = Field(default="", description="额外上下文（如 PR 描述）")
+    file_ids: list[str] = Field(default_factory=list, description="上传文件 ID 列表")
 
 
 class CodeIssue(BaseModel):
@@ -98,10 +100,12 @@ class DataAnalysisInput(BaseModel):
     Attributes:
         query: 用户的自然语言分析需求。
         data_source: 数据源标识（表名、数据集 ID 等）。
+        file_ids: 可选的上传文件 ID 列表。
     """
 
     query: str = Field(description="用户的分析需求描述")
     data_source: str = Field(description="数据源标识")
+    file_ids: list[str] = Field(default_factory=list, description="上传文件 ID 列表")
 
 
 class ChartSpec(BaseModel):
@@ -147,10 +151,12 @@ class QaInput(BaseModel):
     Attributes:
         question: 用户提出的问题。
         domain: 知识领域，如 general、finance、medical。
+        file_ids: 可选的上传文件 ID 列表。
     """
 
     question: str = Field(description="用户问题")
     domain: str = Field(default="general", description="知识领域")
+    file_ids: list[str] = Field(default_factory=list, description="上传文件 ID 列表")
 
 
 class SourceReference(BaseModel):
