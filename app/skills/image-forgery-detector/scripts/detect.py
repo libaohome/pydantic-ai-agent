@@ -1,13 +1,26 @@
 #!/usr/bin/env python3
 """
-Image Forgery Detection Script
-Based on the algorithm from PictureMaterialDetect.java / PictureTamperDetect.java
+图像伪造 / 篡改检测脚本（image-forgery-detector Skill）。
 
-Usage:
+本脚本对 JPEG/PNG 等图片做多维度启发式分析，输出 JSON 格式的风险评分、
+发现项（findings）与文字结论。算法思路源自 PictureMaterialDetect.java /
+PictureTamperDetect.java 的 Python 移植版。
+
+主要检测维度（详见下方各 section）：
+- 元数据：EXIF、编辑软件关键词、AIGC 标识
+- 视觉与局部特征：纹理、梯度、噪声、ELA 等
+- 截图特征：常见屏幕比例、界面元素
+- 文档篡改：证照类版式与局部不一致
+
+命令行用法::
+
     python detect.py <image_path_or_url>
 
-Output:
-    JSON with risk scores, findings, and conclusion.
+输出：stdout 打印 JSON，包含 overall_risk_score、conclusion、findings 等字段。
+
+依赖：numpy、Pillow（PIL）。大图会自动缩放到 MAX_ANALYSIS_EDGE 以控制耗时。
+
+面向小白：本文件较长（约 1700 行），按 section 分段阅读即可，无需逐行理解。
 """
 
 import sys
@@ -25,7 +38,7 @@ from urllib.parse import urlparse
 import numpy as np
 from PIL import Image
 
-# ── Constants ────────────────────────────────────────────────────────────────
+# ── Constants（全局常量：图像类型、量化表、关键词列表等）────────────────────
 
 TYPE_JPEG = "jpeg"
 TYPE_PNG = "png"
@@ -65,7 +78,7 @@ AIGC_METADATA_KEYWORDS = [
     "doubao", "豆包", "元宝",
 ]
 
-# ── Data Classes ─────────────────────────────────────────────────────────────
+# ── Data Classes（分析结果与像素访问的封装类）────────────────────────────────
 
 class AnalysisResult:
     def __init__(self):
@@ -147,7 +160,7 @@ class AnalysisPixels:
         return brightness >= 0.58 and saturation <= 0.28
 
 
-# ── Image Loading ────────────────────────────────────────────────────────────
+# ── Image Loading（从本地路径或 URL 加载图片并转为 numpy 数组）──────────────
 
 def read_image_from_path(path_or_url):
     if re.match(r'^https?://', path_or_url):
@@ -197,7 +210,7 @@ def build_analysis_pixels(pil_image):
     return AnalysisPixels(rgb_array, gray_array), (rgb_array.shape[1], rgb_array.shape[0])
 
 
-# ── Utility Functions ────────────────────────────────────────────────────────
+# ── Utility Functions（通用数学/图像小工具函数）──────────────────────────────
 
 def clamp_score(score):
     return max(0, min(100, score))
@@ -225,7 +238,7 @@ def median(lst):
     return float(s[n // 2])
 
 
-# ── JPEG Parsing ─────────────────────────────────────────────────────────────
+# ── JPEG Parsing（解析 JPEG 二进制：段标记、量化表、APP 元数据等）──────────
 
 def read_u16(data, offset, little_endian=False):
     if offset + 2 > len(data):
@@ -442,7 +455,7 @@ def parse_png_text_chunks(data):
     return result
 
 
-# ── JPEG Analysis ────────────────────────────────────────────────────────────
+# ── JPEG Analysis（基于 JPEG 结构的篡改线索分析）────────────────────────────
 
 def estimate_jpeg_quality(quantization_tables):
     if not quantization_tables:
@@ -485,7 +498,7 @@ def calculate_blockiness(pixels):
     return 0.0 if inner_avg == 0 else boundary_avg / inner_avg
 
 
-# ── Visual Features ──────────────────────────────────────────────────────────
+# ── Visual Features（全图视觉统计特征：亮度、对比度、色彩分布等）────────────
 
 def inspect_visual(pixels):
     h, w = pixels.gray.shape
@@ -553,7 +566,7 @@ def inspect_visual(pixels):
     }
 
 
-# ── Local Features ────────────────────────────────────────────────────────────
+# ── Local Features（局部块级特征：检测区域间不一致）──────────────────────────
 
 def sobel_x(pixels, x, y):
     g = pixels.gray
@@ -616,7 +629,7 @@ def inspect_local(pixels):
     }
 
 
-# ── Screenshot Features ──────────────────────────────────────────────────────
+# ── Screenshot Features（截图判定：宽高比、边缘、状态栏等启发式）────────────
 
 def calculate_edge_density(pixels):
     h, w = pixels.gray.shape
@@ -708,7 +721,7 @@ def inspect_screenshot(pixels, visual):
     }
 
 
-# ── Document Tamper Detection ────────────────────────────────────────────────
+# ── Document Tamper Detection（证件/文档类图片篡改检测入口）──────────────────
 
 def build_block_metric(pixels, page_mask, start_x, start_y, block_size):
     h, w = pixels.gray.shape
@@ -841,7 +854,7 @@ def _flood_fill_page(mask, visited, sx, sy, min_x, min_y, max_x, max_y):
                     stack.append((nx, ny))
 
 
-# ── LBP Texture Inconsistency ────────────────────────────────────────────────
+# ── LBP Texture Inconsistency（LBP 纹理不一致：复制粘贴常见信号）──────────────
 
 def build_lbp_histogram(pixels, page_mask, start_x, start_y, block_size):
     h, w = pixels.gray.shape
@@ -906,7 +919,7 @@ def calculate_lbp_inconsistency(pixels, page_mask, blocks, block_size):
     return suspicious / max(1, effective)
 
 
-# ── Gradient Incoherence ─────────────────────────────────────────────────────
+# ── Gradient Incoherence（梯度不连贯：拼接边缘检测）────────────────────────────
 
 def block_orientation_variance(pixels, page_mask, start_x, start_y, block_size):
     h, w = pixels.gray.shape
@@ -960,7 +973,7 @@ def calculate_gradient_incoherence(pixels, page_mask, blocks, block_size):
     return suspicious / max(1, effective)
 
 
-# ── Noise Inconsistency ──────────────────────────────────────────────────────
+# ── Noise Inconsistency（噪声分布不一致：不同来源区域拼接）────────────────────
 
 def block_laplacian_variance(pixels, page_mask, start_x, start_y, block_size):
     h, w = pixels.gray.shape
@@ -1003,7 +1016,7 @@ def calculate_noise_inconsistency(pixels, page_mask, min_x, min_y, max_x, max_y,
     return suspicious / len(block_noise)
 
 
-# ── ELA (Error Level Analysis) ──────────────────────────────────────────────
+# ── ELA (Error Level Analysis)（误差级分析：JPEG 重压缩痕迹）──────────────────
 
 def reencode_jpeg(pil_image, quality=90):
     buf = io.BytesIO()
@@ -1056,7 +1069,7 @@ def calculate_ela_anomaly(pil_image, pixels, page_mask, min_x, min_y, max_x, max
     return suspicious / len(block_ela)
 
 
-# ── Scatter Noise Profile ────────────────────────────────────────────────────
+# ── Scatter Noise Profile（散点噪声剖面分析）──────────────────────────────────
 
 def is_scatter_noise_profile(patch, std_var, cluster_cover, cluster_ratio):
     if patch >= 0.45 and std_var < 26 and cluster_cover >= 0.28:
@@ -1068,7 +1081,7 @@ def is_scatter_noise_profile(patch, std_var, cluster_cover, cluster_ratio):
     return patch >= 0.36 and std_var < 28 and cluster_cover < 0.22 and cluster_ratio < 0.78
 
 
-# ── Document Inspection ──────────────────────────────────────────────────────
+# ── Document Inspection（文档版式、纸张区域、文字块检查）──────────────────────
 
 def inspect_document(pixels, pil_image):
     h, w = pixels.gray.shape
@@ -1190,7 +1203,7 @@ def inspect_document(pixels, pil_image):
     return result
 
 
-# ── Metadata Inspection ──────────────────────────────────────────────────────
+# ── Metadata Inspection（EXIF/元数据：软件名、AIGC 标签、时间戳等）────────────
 
 def inspect_metadata(image_bytes, image_type):
     result = {"exif_present": False, "make": None, "model": None, "software": None,
@@ -1301,7 +1314,7 @@ def inspect_metadata(image_bytes, image_type):
     return result
 
 
-# ── Main Detection ───────────────────────────────────────────────────────────
+# ── Main Detection（主检测流程：串联各子模块并汇总风险分）────────────────────
 
 def compute_tamper_index(document, metadata, is_screenshot=False):
     std_var = document.get("background_noise_variance", 0)
@@ -1633,7 +1646,7 @@ def decide(metadata, document, compression_risk, screenshot, image_type, file_na
     }
 
 
-# ── Main Entry Point ─────────────────────────────────────────────────────────
+# ── Main Entry Point（命令行入口：解析参数、调用检测、打印 JSON）──────────────
 
 def analyze(image_path_or_url):
     img, image_bytes = read_image_from_path(image_path_or_url)

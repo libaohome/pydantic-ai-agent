@@ -170,6 +170,7 @@ uv pip install -e ".[dev]"
 
 # 或传统方式
 pip install -e ".[dev]"
+pip install -e .
 ```
 
 ### 4. 启动服务
@@ -723,7 +724,6 @@ curl -X POST http://localhost:8000/api/v1/skills/upload \
 |--------|--------|------|
 | `APP_ENV` | `development` | 运行环境：development / staging / production |
 | `APP_SECRET_KEY` | `change-me-in-production` | 应用密钥（生产环境务必修改） |
-| `DEBUG` | `false` | 调试模式 |
 | `DEFAULT_MODEL` | `deepseek:deepseek-chat` | 默认 LLM 模型 |
 | `OPENAI_API_KEY` | — | OpenAI API Key |
 | `ANTHROPIC_API_KEY` | — | Anthropic API Key |
@@ -783,6 +783,17 @@ result = agent.run_sync('test input')  # 不调用真实 LLM
 ### Q: 多租户如何实现？
 
 在 `AgentDeps` 中传入 `tenant_id`，工具函数中根据 `ctx.deps.tenant_id` 做数据隔离。数据库层可通过行级安全策略（RLS）实现。
+
+---
+
+
+app/main.py          → 程序从哪启动
+app/core/config.py   → 配置怎么读
+app/agents/registry.py → 有哪些 Agent
+app/api/routes.py    → API 怎么调用 Agent
+app/graphs/workflow.py → 多 Agent 怎么协作
+app/ui/gradio_app.py → Web 界面怎么连后端
+
 
 ---
 

@@ -21,6 +21,7 @@ dependencies = [
     "python-multipart>=0.0.18,<1",
     "pillow>=10.0,<12",
     "numpy>=1.26,<3",
+    "gradio>=4.0.0",
 ]
 
 [project.optional-dependencies]
@@ -52,7 +53,7 @@ strict = true
 
 [tool.pyright]
 pythonVersion = "3.12"
-include = ["app", "tests", "scripts"]
+include = ["app", "tests", "scripts", "startup.py"]
 extraPaths = ["."]
 venvPath = "/opt/miniconda3/envs"
 venv = "py312"

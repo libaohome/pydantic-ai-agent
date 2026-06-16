@@ -1,4 +1,17 @@
-"""知识问答 Agent — 基于知识库的智能问答"""
+"""知识问答 Agent — 基于知识库的智能问答。
+
+本模块定义了一个知识问答助手 Agent，能够：
+1. 搜索内部知识库和互联网获取信息
+2. 加载并执行 Skills（可插拔技能包）中的脚本
+3. 综合多源信息生成有据可查的回答
+4. 返回 ``QaOutput`` 结构化结果（答案、来源、置信度、追问建议）
+
+面向小白的关键概念：
+- **toolsets**：与单个 ``@agent.tool`` 不同，toolsets 是一组预打包工具的集合
+  （此处通过 ``create_skills_toolset()`` 注入 Skills 相关工具）。
+- **Skills**：项目中的可扩展技能模块，Agent 可先 ``load_skill`` 再 ``run_skill_script``。
+- **置信度**：模型对自身回答可靠程度的评估，0 表示完全不确定。
+"""
 
 from __future__ import annotations
 
@@ -7,7 +20,7 @@ from pydantic_ai import Agent, RunContext
 from app.core.deps import AgentDeps
 from app.core.llm import get_llm_manager
 from app.models.schemas import QaOutput
-from app.skills.integration import create_skills_toolset
+from app.skills.integration import create_skills_toolset  # 创建 Skills 工具集工厂函数
 
 
 # ─── Agent 定义 ──────────────────────────────────
@@ -16,7 +29,7 @@ qa_agent = Agent[AgentDeps, QaOutput](
     model=get_llm_manager().resolve_model_string("deepseek-chat"),
     output_type=QaOutput,
     deps_type=AgentDeps,
-    toolsets=[create_skills_toolset()],
+    toolsets=[create_skills_toolset()],  # 列表形式注册工具集，与下方 @tool 可并存
     instructions="""你是一名知识问答助手。你的任务：
 
 1. 理解用户的问题
@@ -44,13 +57,30 @@ qa_agent = Agent[AgentDeps, QaOutput](
 
 @qa_agent.tool
 async def search_kb(ctx: RunContext[AgentDeps], query: str, top_k: int = 5) -> str:
-    """搜索内部知识库"""
+    """搜索内部知识库。
+
+    Args:
+        ctx: 运行上下文。
+        query: 搜索关键词或自然语言问句。
+        top_k: 返回最相关的前 k 条结果，默认 5。
+
+    Returns:
+        知识库检索结果的字符串。
+    """
     from app.tools.kb_tools import search_knowledge_base
     return await search_knowledge_base(ctx, query, top_k)
 
 
 @qa_agent.tool
 async def search_internet(ctx: RunContext[AgentDeps], query: str) -> str:
-    """搜索互联网"""
+    """搜索互联网以补充知识库未覆盖的信息。
+
+    Args:
+        ctx: 运行上下文。
+        query: 搜索关键词。
+
+    Returns:
+        网页搜索结果的摘要字符串。
+    """
     from app.tools.kb_tools import search_web
     return await search_web(ctx, query)

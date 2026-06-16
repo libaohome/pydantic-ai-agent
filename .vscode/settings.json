@@ -1,5 +1,6 @@
 {
   "python.defaultInterpreterPath": "/opt/miniconda3/envs/py312/bin/python",
   "python.analysis.diagnosticMode": "workspace",
-  "python.analysis.extraPaths": ["${workspaceFolder}"]
+  "python.analysis.extraPaths": ["${workspaceFolder}"],
+  "python.envFile": "${workspaceFolder}/.env"
 }
