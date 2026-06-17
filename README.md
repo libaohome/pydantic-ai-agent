@@ -8,7 +8,7 @@
 
 | 特性 | 说明 |
 |------|------|
-| **多模型路由** | 8 个模型预注册（DeepSeek / GPT / Claude / Gemini / Qwen-本地），一行字符串切换 |
+| **多模型路由** | 6 个模型预注册（DeepSeek / LongCat / Agnes AI / 商汤），一行别名切换 |
 | **结构化输出** | Agent 绑定 Pydantic `output_type`，LLM 返回自动验证 + 失败重试 |
 | **依赖注入** | `AgentDeps` dataclass 通过 `RunContext` 注入到工具函数，干净解耦 |
 | **Skill 动态加载** | ZIP 上传 → 安全扫描 → 自动安装 → Agent 按需加载执行，无需重启 |
@@ -17,6 +17,7 @@
 | **成本追踪** | 每次调用按 Token 计费，全局汇总报告 |
 | **安全工具** | Shell 白名单 + 黑名单双检，SQL 只允许 SELECT + 强制 LIMIT |
 | **Docker 部署** | 多阶段构建 + docker-compose，含可选 Ollama 本地模型 |
+| **Gradio 控制台** | `/ui` 提供 Chat / Agent / Workflow / Model / Skills 可视化管理 |
 
 ---
 
@@ -38,25 +39,28 @@
 ## 项目结构
 
 ```
-pydantic-ai-agent-starter/
+pydantic-ai-agent/
 ├── pyproject.toml                    # 项目配置 + 依赖声明
 ├── .env.example                      # 环境变量模板
 ├── .gitignore
 │
 ├── app/
-│   ├── main.py                       # FastAPI 应用入口 + 生命周期
+│   ├── main.py                       # FastAPI 应用入口 + 生命周期 + Gradio 挂载
 │   │
 │   ├── core/                         # 🏗 基础设施层
 │   │   ├── config.py                 #   配置中心（pydantic-settings，自动 .env 加载）
 │   │   ├── llm.py                    #   LLM 管理器（8 模型预注册 + 成本追踪 + 动态切换）
 │   │   ├── deps.py                   #   依赖注入容器 + DB 会话管理
+│   │   ├── uploads.py                #   上传文件存储（file_id 元数据与读取）
 │   │   └── observability.py          #   Logfire 全链路追踪配置
 │   │
 │   ├── agents/                       # 🤖 Agent 层
 │   │   ├── code_reviewer.py          #   代码审查 Agent（结构化输出 CodeReviewOutput）
 │   │   ├── data_analyst.py           #   数据分析 Agent（SQL 工具链 + 图表生成）
-│   │   ├── qa_assistant.py           #   知识问答 Agent（KB 搜索 + Web 搜索）
-│   │   └── registry.py              #   Agent 注册表（统一管理 + 动态查找）
+│   │   ├── qa_assistant.py           #   知识问答 Agent（KB / Web / Skills / 天气）
+│   │   ├── registry.py               #   Agent 注册表（AgentName + list_agents）
+│   │   ├── runner.py                 #   统一 Agent 执行入口 run_agent()
+│   │   └── input_files.py            #   附件预处理（file_id 注入 prompt）
 │   │
 │   ├── tools/                        # 🔧 工具层
 │   │   ├── file_tools.py             #   文件读写 / Shell 执行 / Web 请求
@@ -64,33 +68,41 @@ pydantic-ai-agent-starter/
 │   │   └── kb_tools.py               #   知识库搜索 / 网络搜索
 │   │
 │   ├── graphs/                       # 🔀 图编排层
-│   │   └── workflow.py               #   pydantic-graph 多 Agent 协作工作流
+│   │   ├── agent_router.py           #   agent-router 工作流图（意图路由 → Agent）
+│   │   ├── registry.py               #   Workflow 注册表（WorkflowName + list_workflows）
+│   │   └── runner.py                 #   统一 Workflow 执行入口 run_workflow()
 │   │
 │   ├── skills/                       # 📦 Skill 动态加载层
 │   │   ├── manager.py                #   SkillPackageManager（ZIP 上传/安全扫描/安装/卸载）
 │   │   ├── integration.py            #   pydantic-ai-skills 集成（SkillsCapability/Toolset）
 │   │   ├── routes.py                 #   Skill 管理 API（上传/列表/卸载）
-│   │   ├── code-review/              #   示例 Skill
-│   │   │   ├── SKILL.md              #     技能声明（YAML frontmatter + Markdown 指令）
-│   │   │   ├── scripts/              #     可执行脚本
-│   │   │   │   └── count_lines.py
-│   │   │   └── resources/            #     参考文档
-│   │   │       └── security-checklist.md
-│   │   └── _manifest.json            #   已安装 Skill 清单（自动生成）
+│   │   ├── code-review/              #   示例 Skill（脚本 + 资源）
+│   │   ├── weather/                  #   天气 Skill（scripts/forecast.py）
+│   │   ├── image-forgery-detector/   #   图像伪造检测 Skill
+│   │   └── _manifest.json            #   已安装 Skill 清单（上传时写入）
 │   │
 │   ├── api/                          # 🌐 API 层
-│   │   └── routes.py                 #   REST API 路由（8 个接口）
+│   │   └── routes.py                 #   REST API（Agent / Workflow 统一端点）
+│   │
+│   ├── ui/                           # 🖥 Web 控制台
+│   │   └── gradio_app.py             #   Gradio 管理界面（Chat / Agent / Workflow / Skills）
 │   │
 │   └── models/                       # 📋 数据模型层
-│       ├── schemas.py                #   Pydantic 输入/输出 Schema（6 组）
+│       ├── schemas.py                #   Pydantic Schema（Agent/Workflow 契约 + 结构化输出）
 │       └── schema.py                 #   SQLAlchemy ORM 模型
 │
 ├── tests/                            # 🧪 测试
 │   ├── conftest.py                   #   pytest 全局 fixtures
 │   ├── test_code_reviewer.py         #   代码审查 Agent 测试
+│   ├── test_runner.py                #   run_agent 统一执行层测试
+│   ├── test_workflow.py              #   图工作流路由测试
+│   ├── test_workflow_runner.py       #   run_workflow 执行层测试
+│   ├── test_input_files.py           #   附件预处理测试
+│   ├── test_weather_forecast.py      #   天气 Skill 脚本测试
 │   ├── test_llm_manager.py           #   LLM 管理器测试
 │   ├── test_skill_manager.py         #   Skill 管理器测试
-│   └── test_workflow.py              #   图工作流测试
+│   ├── test_uploads.py               #   上传存储测试
+│   └── test_gradio_uploads.py        #   Gradio 上传集成测试
 │
 ├── docker/                           # 🐳 部署
 │   ├── Dockerfile                    #   多阶段构建（builder → production）
@@ -109,9 +121,12 @@ pydantic-ai-agent-starter/
 
 ```
 ┌──────────────────────────────────────────────────────┐
-│                    API 层 (FastAPI)                    │
-│  /agents/*  /skills/*  /health                        │
-│  JWT 认证 · 请求校验 · 成本追踪                        │
+│              API 层 (FastAPI) + Gradio UI (/ui)        │
+│  /api/v1/agents/*  /api/v1/skills/*  /health          │
+│  统一请求校验 · success/error 信封 · 成本追踪            │
+├──────────────────────────────────────────────────────┤
+│           执行层 (runner.py)                           │
+│  run_agent() · run_workflow() · input_files 预处理     │
 ├──────────────────────────────────────────────────────┤
 │                  Agent 层 (Pydantic AI)                │
 │  CodeReviewer · DataAnalyst · QaAssistant             │
@@ -124,7 +139,7 @@ pydantic-ai-agent-starter/
 │                基础设施层                               │
 │  LlmManager (8模型路由) · Config (pydantic-settings)   │
 │  Logfire (全链路追踪) · SQLAlchemy (持久化)             │
-│  SecurityScanner (Skill 安全) · SkillPackageManager    │
+│  UploadStore (附件) · SecurityScanner · SkillManager   │
 └──────────────────────────────────────────────────────┘
 ```
 
@@ -139,7 +154,7 @@ pydantic-ai-agent-starter/
 python --version
 
 # 克隆项目
-cd pydantic-ai-agent-starter
+cd pydantic-ai-agent
 ```
 
 ### 2. 配置环境变量
@@ -148,17 +163,19 @@ cd pydantic-ai-agent-starter
 cp .env.example .env
 ```
 
-编辑 `.env`，至少填入一个 LLM 提供商的 API Key：
+编辑 `.env`，填入各 Provider 的 API Key 与 Base URL（见 `.env.example`）：
 
 ```bash
-# 推荐 DeepSeek（性价比最高）
 DEEPSEEK_API_KEY=sk-your-key-here
 
-# 或 OpenAI
-OPENAI_API_KEY=sk-your-key-here
+LONGCAT_API_KEY=ak-xxx
+LONGCAT_BASE_URL=https://api.longcat.chat/openai
 
-# 或 Anthropic
-ANTHROPIC_API_KEY=sk-ant-your-key-here
+AGNESAI_API_KEY=sk-xxx
+AGNESAI_BASE_URL=https://apihub.agnes-ai.com/v1
+
+SENSENOVA_API_KEY=sk-xxx
+SENSENOVA_BASE_URL=https://token.sensenova.cn/v1
 ```
 
 ### 3. 安装依赖
@@ -187,23 +204,61 @@ python -m app.main
 ```
 
 启动成功后访问：
-- API 文档（Swagger）：http://localhost:8000/docs
-- 健康检查：http://localhost:8000/health
+- **Gradio 控制台**：http://localhost:8000/ui/（根路径 `/` 自动重定向至此）
+- **API 文档（Swagger）**：http://localhost:8000/docs
+- **健康检查**：http://localhost:8000/health
 
 ---
 
+## Gradio Web 控制台
+
+服务启动后访问 http://localhost:8000/ui/，提供五个 Tab：
+
+| Tab | 功能 |
+|-----|------|
+| **Chat** | 与 Agent 多轮对话，支持附件上传、模型切换、会话导出 |
+| **Agent** | 查看已注册 Agent 列表，单次测试调用 |
+| **Workflow** | 查看已注册 Workflow 列表，测试意图路由工作流 |
+| **Model** | 模型注册表、API Key 状态、累计调用成本 |
+| **Skills** | 上传/卸载 Skill ZIP，查看已安装列表 |
+
+> Gradio 与 REST API **共用同一进程**，直接调用 `run_agent()` / `run_workflow()` / `list_agents()` 等 Python 函数，**不经过** HTTP `/api/v1/...` 接口。
+
 ## API 接口文档
 
-### Agent 接口
+所有 Agent / Workflow 接口统一挂载在 `/api/v1` 前缀下（见 `app/main.py`）。
+
+### Agent / Workflow 接口
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| `GET` | `/api/v1/agents/` | 列出所有可用 Agent |
-| `POST` | `/api/v1/agents/code-review` | 代码审查 |
-| `POST` | `/api/v1/agents/data-analysis` | 数据分析 |
-| `POST` | `/api/v1/agents/qa` | 知识问答 |
-| `POST` | `/api/v1/agents/run` | 图编排工作流（自动路由） |
+| `GET` | `/api/v1/agents/` | 列出所有可用 Agent 与 Workflow |
+| `POST` | `/api/v1/agents/{name}/agent` | 运行指定 Agent（统一端点） |
+| `POST` | `/api/v1/agents/{workflow_name}/workflow` | 运行指定 Workflow |
 | `GET` | `/api/v1/agents/costs` | 成本追踪报告 |
+
+**Agent 名称**（`{name}`）：`code-reviewer` | `data-analyst` | `qa-assistant`
+
+**Workflow 名称**（`{workflow_name}`）：`agent-router`
+
+### 请求 / 响应契约
+
+**`AgentRunRequest`**（`POST .../agent` 请求体）：
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `user_input` | `str` | — | 传给 Agent 的用户输入 |
+| `tenant_id` | `str` | `tenant01` | 租户 ID |
+| `user_id` | `str` | `user01` | 用户 ID |
+| `session_id` | `str` | `session01` | 会话 ID |
+| `model_alias` | `str \| null` | `null` | 可选模型别名 |
+| `file_ids` | `list[str]` | `[]` | 已上传文件 ID 列表 |
+
+**`AgentRunResult`**（响应信封）：`status` 为 `success` 或 `error`；成功时 `output` 为各 Agent 的结构化输出，失败时 `error` 含错误信息；另含 `usage`、`cost_usd`、`elapsed_seconds`。
+
+**`WorkflowRunRequest`**：`user_input`、`tenant_id`、`user_id`、`session_id`、`file_ids`（字段含义同上）。
+
+**`WorkflowRunResult`**：`state` 含 `qa_result` / `review_result` / `analysis_result` 等分支结果摘要。
 
 ### Skill 接口
 
@@ -217,36 +272,40 @@ python -m app.main
 ### 调用示例
 
 ```bash
-# 列出可用 Agent
+# 列出可用 Agent 与 Workflow
 curl http://localhost:8000/api/v1/agents/
 
-# 代码审查
-curl -X POST http://localhost:8000/api/v1/agents/code-review \
+# 代码审查（统一 Agent 端点）
+curl -X POST http://localhost:8000/api/v1/agents/code-reviewer/agent \
   -H "Content-Type: application/json" \
   -d '{
-    "code": "def add(a, b): return a+b\n\ndef div(a, b): return a/b",
-    "language": "python",
-    "context": "PR #42: 新增数学工具函数"
+    "user_input": "请审查以下 Python 代码：\ndef add(a, b): return a+b\n\ndef div(a, b): return a/b",
+    "session_id": "session01"
   }'
 
 # 数据分析
-curl -X POST http://localhost:8000/api/v1/agents/data-analysis \
+curl -X POST http://localhost:8000/api/v1/agents/data-analyst/agent \
   -H "Content-Type: application/json" \
   -d '{
-    "query": "统计每个部门的平均薪资",
-    "data_source": "hr_db"
+    "user_input": "统计每个部门的平均薪资",
+    "session_id": "session01"
   }'
 
 # 知识问答
-curl -X POST http://localhost:8000/api/v1/agents/qa \
+curl -X POST http://localhost:8000/api/v1/agents/qa-assistant/agent \
   -H "Content-Type: application/json" \
   -d '{
-    "question": "什么是 RAG 技术？它和微调有什么区别？",
-    "domain": "ai"
+    "user_input": "什么是 RAG 技术？它和微调有什么区别？",
+    "session_id": "session01"
   }'
 
-# 图工作流（自动路由到合适的 Agent）
-curl -X POST "http://localhost:8000/api/v1/agents/run?user_input=帮我审查这段Python代码的潜在bug"
+# 意图路由工作流（自动选择 Agent）
+curl -X POST http://localhost:8000/api/v1/agents/agent-router/workflow \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_input": "帮我审查这段 Python 代码有没有 bug",
+    "session_id": "session01"
+  }'
 
 # 成本报告
 curl http://localhost:8000/api/v1/agents/costs
@@ -254,21 +313,19 @@ curl http://localhost:8000/api/v1/agents/costs
 
 ### 指定模型
 
-所有 Agent 接口支持通过 `model` 查询参数动态切换模型：
+在请求体的 `model_alias` 字段中指定模型别名（非法别名返回 `status: "error"`，不抛 HTTP 异常）：
 
 ```bash
-# 使用 GPT-5.2
-curl -X POST "http://localhost:8000/api/v1/agents/qa?model=gpt-5.2" \
+# 使用 deepseek-reasoner
+curl -X POST http://localhost:8000/api/v1/agents/qa-assistant/agent \
   -H "Content-Type: application/json" \
-  -d '{"question": "什么是微服务？"}'
-
-# 使用 Claude Sonnet
-curl -X POST "http://localhost:8000/api/v1/agents/code-review?model=claude-sonnet" \
-  -H "Content-Type: application/json" \
-  -d '{"code": "...", "language": "python"}'
+  -d '{
+    "user_input": "什么是微服务？",
+    "model_alias": "deepseek-reasoner"
+  }'
 ```
 
-可选模型别名：`deepseek-chat` | `deepseek-reasoner` | `gpt-5.2` | `gpt-5.2-mini` | `claude-sonnet` | `claude-haiku` | `gemini-2.5-pro` | `qwen-local`
+可选模型别名：`deepseek-chat` | `deepseek-reasoner` | `longcat-2.0-preview` | `agnes-2.0-flash` | `sensenova-6.7-flash-lite` | `sensenova-u1-fast`
 
 ---
 
@@ -278,16 +335,14 @@ curl -X POST "http://localhost:8000/api/v1/agents/code-review?model=claude-sonne
 
 ### 预注册模型
 
-| 别名 | Provider | 模型 | 输入价格 ($/1M tokens) | 输出价格 |
-|------|----------|------|----------------------|---------|
-| `deepseek-chat` | DeepSeek | deepseek-chat | $0.27 | $1.10 |
-| `deepseek-reasoner` | DeepSeek | deepseek-reasoner | $0.55 | $2.19 |
-| `gpt-5.2` | OpenAI | gpt-5.2 | $2.00 | $8.00 |
-| `gpt-5.2-mini` | OpenAI | gpt-5.2-mini | $0.15 | $0.60 |
-| `claude-sonnet` | Anthropic | claude-sonnet-4-20250514 | $3.00 | $15.00 |
-| `claude-haiku` | Anthropic | claude-haiku-4-20250506 | $0.80 | $4.00 |
-| `gemini-2.5-pro` | Google | gemini-2.5-pro | $1.25 | $10.00 |
-| `qwen-local` | Ollama (本地) | qwen2.5-coder:7b | $0 | $0 |
+| 别名 | Provider | 模型 | 输入价格 ($/1M tokens) | 输出价格 | 能力 |
+|------|----------|------|----------------------|---------|------|
+| `deepseek-chat` | DeepSeek | deepseek-chat | $0.27 | $1.10 | 文本 |
+| `deepseek-reasoner` | DeepSeek | deepseek-reasoner | $0.55 | $2.19 | 推理 |
+| `longcat-2.0-preview` | LongCat (OpenAI 兼容) | LongCat-2.0-Preview | — | — | 文本 |
+| `agnes-2.0-flash` | Agnes AI (OpenAI 兼容) | agnes-2.0-flash | — | — | 文本 |
+| `sensenova-6.7-flash-lite` | 商汤 (OpenAI 兼容) | sensenova-6.7-flash-lite | — | — | 文本 + 图片理解 |
+| `sensenova-u1-fast` | 商汤 (OpenAI 兼容) | sensenova-u1-fast | — | — | 文生图 |
 
 ### 使用方式
 
@@ -305,7 +360,7 @@ cost = llm.track_cost("deepseek-chat", input_tokens=1000, output_tokens=500)
 
 # 获取成本报告
 report = llm.get_cost_report()
-# → {"deepseek-chat": 0.000825, "gpt-5.2": 0.005, ...}
+# → {"deepseek-chat": 0.000825, "deepseek-reasoner": 0.0012, ...}
 ```
 
 ### 添加自定义模型
@@ -322,7 +377,7 @@ MODEL_REGISTRY: dict[ModelAlias, ModelConfig] = {
     # ... 现有配置
     "my-custom-model": ModelConfig(
         alias="my-custom-model",
-        provider="openai",                    # pydantic-ai 支持的 provider
+        provider="deepseek",                    # pydantic-ai 支持的 provider
         model_id="my-finetuned-v2",
         base_url="https://api.my-company.com/v1",  # 自定义端点
         api_key_env="MY_COMPANY_API_KEY",
@@ -420,6 +475,8 @@ curl -X DELETE http://localhost:8000/api/v1/skills/uninstall \
 
 上传后 **无需重启服务**，`SkillsToolset` 每次运行都会重新扫描 skills/ 目录。
 
+> **注意**：`_manifest.json` 中的 `has_scripts` / `has_resources` 在上传安装时写入。若之后手动向 Skill 目录添加 `scripts/`，列表可能仍显示 `-`，需重新上传或更新 manifest。
+
 ### 安全防护
 
 | 防护层 | 检测内容 |
@@ -466,56 +523,66 @@ result = await agent.run('帮我审查这段代码')
 
 ## 图编排工作流
 
-`app/graphs/workflow.py` 使用 `pydantic-graph` 定义多 Agent 协作工作流：
+`app/graphs/agent_router.py` 使用 `pydantic-graph` 定义 **agent-router** 工作流，节点内部统一调用 `run_agent()`：
 
 ```
 用户输入
    │
    ▼
 ┌─────────────┐
-│  RouterNode  │  意图识别 + 路由
+│  RouterNode  │  classify_route() 关键词意图识别
 └──────┬──────┘
        │
-       ├── 包含"数据/统计/分析" ──→ AnalyzeNode ──→ ReviewNode ──→ End
+       ├── 数据/统计/SQL/分析 ──→ AnalyzeNode (data-analyst) ──→ End
        │
-       ├── 包含"审查/review/bug" ──→ ReviewNode ──→ End
+       ├── 审查/review/bug ──→ ReviewNode (code-reviewer) ──→ End
        │
-       └── 包含"什么是/怎么/为什么" ──→ QaNode ──→ End
+       └── 问答/天气/Skill/图像检测等 ──→ QaNode (qa-assistant) ──→ End
 ```
+
+注册与执行：
+
+| 模块 | 职责 |
+|------|------|
+| `app/graphs/registry.py` | `WorkflowName` 枚举 + `list_workflows()` |
+| `app/graphs/runner.py` | `run_workflow()` 统一执行 + `WorkflowRunResult` 封装 |
+| `app/api/routes.py` | `POST /api/v1/agents/agent-router/workflow` |
 
 当前路由逻辑基于关键词匹配（适合快速验证），生产环境可替换为 LLM 意图分类。
 
----
-
 ## 三个预构建 Agent
+
+所有 Agent 通过统一入口 `run_agent(AgentName, AgentRunRequest)` 执行（`app/agents/runner.py`），API 层与 Gradio 均调用此函数。
 
 ### CodeReviewer — 代码审查
 
 | 配置 | 值 |
 |------|---|
-| 输入 | `CodeReviewInput`（code, language, context） |
+| 名称 | `code-reviewer` |
+| 输入 | `user_input`（自然语言 + 可选代码/附件，由 `input_files.py` 预处理） |
 | 输出 | `CodeReviewOutput`（summary, issues[], quality_score, approved） |
-| 工具 | `read_file`, `run_shell` |
+| 工具 | `read_file`, `run_shell`, 上传文件读取 |
 | 模型 | 默认 `deepseek-chat` |
 
 ```python
-from app.agents.registry import get_agent, AgentName
+from app.agents import run_agent
+from app.agents.registry import AgentName
+from app.models.schemas import AgentRunRequest
 
-agent = get_agent(AgentName.code_reviewer)
-result = await agent.run(
-    "Review the following Python code:\n\ndef div(a, b): return a/b",
-    deps=AgentDeps(tenant_id="acme"),
+result = await run_agent(
+    AgentName.code_reviewer,
+    AgentRunRequest(user_input="Review: def div(a, b): return a/b"),
 )
-print(result.output.quality_score)   # int, 0-100
-print(result.output.issues)          # list[CodeIssue]
-print(result.output.approved)        # bool
+if result.is_success:
+    print(result.output["quality_score"])
 ```
 
 ### DataAnalyst — 数据分析
 
 | 配置 | 值 |
 |------|---|
-| 输入 | `DataAnalysisInput`（query, data_source） |
+| 名称 | `data-analyst` |
+| 输入 | `user_input`（自然语言分析需求 + 可选附件） |
 | 输出 | `DataAnalysisOutput`（analysis, charts[], sql_query, recommendations） |
 | 工具 | `execute_query`, `list_tables`, `describe_table` |
 | 模型 | 默认 `deepseek-chat` |
@@ -524,12 +591,13 @@ print(result.output.approved)        # bool
 
 | 配置 | 值 |
 |------|---|
-| 输入 | `QaInput`（question, domain） |
+| 名称 | `qa-assistant` |
+| 输入 | `user_input`（自然语言问题） |
 | 输出 | `QaOutput`（answer, confidence, sources[], follow_ups[]） |
-| 工具 | `search_knowledge_base`, `web_search` |
+| 工具 | `search_knowledge_base`, `web_search`, `get_weather_forecast`, Skills 工具集 |
 | 模型 | 默认 `deepseek-chat` |
 
----
+> `schemas.py` 中仍保留 `CodeReviewInput`、`DataAnalysisInput`、`QaInput` 等类型，供 Agent 的 `output_type` 与文档参考；**API 统一使用 `AgentRunRequest.user_input`** 传递输入。
 
 ## 依赖注入
 
@@ -550,16 +618,22 @@ async def my_tool(ctx: RunContext[AgentDeps], query: str) -> str:
     ...
 ```
 
-运行时注入：
+运行时注入（通过 `run_agent` 自动构造 `AgentDeps`）：
 
 ```python
-deps = AgentDeps(
-    tenant_id="acme-corp",
-    user_id="alice",
-    request_id="req-001",
-    metadata={"plan": "enterprise"},
+from app.agents import run_agent
+from app.agents.registry import AgentName
+from app.models.schemas import AgentRunRequest
+
+result = await run_agent(
+    AgentName.qa_assistant,
+    AgentRunRequest(
+        user_input="帮我分析数据",
+        tenant_id="tenant01",
+        user_id="user01",
+        session_id="session01",
+    ),
 )
-result = await agent.run("帮我分析数据", deps=deps)
 ```
 
 ---
@@ -593,9 +667,11 @@ pytest
 pytest --cov=app --cov-report=html
 
 # 只运行特定模块
+pytest tests/test_runner.py
+pytest tests/test_workflow_runner.py
 pytest tests/test_code_reviewer.py
 pytest tests/test_skill_manager.py
-pytest tests/test_workflow.py
+pytest tests/test_weather_forecast.py
 ```
 
 测试使用 Model `test`（Pydantic AI 内置的 mock 模型），无需真实 API Key。
@@ -685,9 +761,15 @@ class AgentName(str, Enum):
 AGENTS[AgentName.my_agent] = my_agent
 ```
 
-4. 在 `app/api/routes.py` 中添加 API 端点
+4. 无需新增 API 端点 — `POST /api/v1/agents/my-agent/agent` 自动可用
 
 5. 在 `tests/` 中添加测试
+
+### 添加新 Workflow
+
+1. 在 `app/graphs/` 中定义图（参考 `agent_router.py`）
+2. 在 `app/graphs/registry.py` 的 `WorkflowName` 和 `WORKFLOWS` 中注册
+3. `POST /api/v1/agents/{workflow_name}/workflow` 自动可用
 
 ### 添加新 Skill
 
@@ -725,10 +807,13 @@ curl -X POST http://localhost:8000/api/v1/skills/upload \
 | `APP_ENV` | `development` | 运行环境：development / staging / production |
 | `APP_SECRET_KEY` | `change-me-in-production` | 应用密钥（生产环境务必修改） |
 | `DEFAULT_MODEL` | `deepseek:deepseek-chat` | 默认 LLM 模型 |
-| `OPENAI_API_KEY` | — | OpenAI API Key |
-| `ANTHROPIC_API_KEY` | — | Anthropic API Key |
-| `GOOGLE_API_KEY` | — | Google AI API Key |
 | `DEEPSEEK_API_KEY` | — | DeepSeek API Key |
+| `LONGCAT_API_KEY` | — | LongCat API Key |
+| `LONGCAT_BASE_URL` | `https://api.longcat.chat/openai` | LongCat OpenAI 兼容 Base URL |
+| `AGNESAI_API_KEY` | — | Agnes AI API Key |
+| `AGNESAI_BASE_URL` | `https://apihub.agnes-ai.com/v1` | Agnes AI Base URL |
+| `SENSENOVA_API_KEY` | — | 商汤 SenseNova API Key |
+| `SENSENOVA_BASE_URL` | `https://token.sensenova.cn/v1` | 商汤 SenseNova Base URL |
 | `LOGFIRE_TOKEN` | — | Logfire 可观测性 Token |
 | `DATABASE_URL` | `sqlite+aiosqlite:///./data/agent.db` | 数据库连接字符串 |
 | `MCP_FETCH_URL` | — | MCP Fetch 服务器 SSE 地址 |
@@ -745,13 +830,21 @@ curl -X POST http://localhost:8000/api/v1/skills/upload \
 | 图编排 | 中（pydantic-graph 类型化状态机） | **强**（DAG + 条件分支） | 无 |
 | Skill 动态加载 | **有**（pydantic-ai-skills + ZIP 管理） | 无 | 有（原生 SKILL.md） |
 | 可观测性 | **Logfire 原生** | LangSmith | 事件流 |
-| 多模型路由 | **8 模型预注册** | 需自建 | 20+ 原生支持 |
+| 多模型路由 | **6 模型预注册**（DeepSeek / LongCat / Agnes AI / 商汤） | 需自建 | 20+ 原生支持 |
 | 学习曲线 | **低** | 高 | 低 |
 | 语言 | Python | Python | TypeScript |
 
 ---
 
 ## 常见问题
+
+### Q: 访问 `/agents/` 返回 404？
+
+Agent API 统一挂载在 `/api/v1` 前缀下，请使用：
+
+```
+http://localhost:8000/api/v1/agents/
+```
 
 ### Q: 启动时报 `ModuleNotFoundError: No module named 'pydantic_ai'`
 
@@ -786,14 +879,18 @@ result = agent.run_sync('test input')  # 不调用真实 LLM
 
 ---
 
+## 关键文件导航
 
-app/main.py          → 程序从哪启动
-app/core/config.py   → 配置怎么读
-app/agents/registry.py → 有哪些 Agent
-app/api/routes.py    → API 怎么调用 Agent
-app/graphs/workflow.py → 多 Agent 怎么协作
-app/ui/gradio_app.py → Web 界面怎么连后端
-
+| 文件 | 说明 |
+|------|------|
+| `app/main.py` | 程序入口，挂载 `/api/v1` 路由与 `/ui` Gradio |
+| `app/core/config.py` | 配置读取 |
+| `app/agents/registry.py` | Agent 注册表 |
+| `app/agents/runner.py` | 统一 Agent 执行 `run_agent()` |
+| `app/api/routes.py` | REST API 端点 |
+| `app/graphs/agent_router.py` | agent-router 工作流图 |
+| `app/graphs/runner.py` | 统一 Workflow 执行 `run_workflow()` |
+| `app/ui/gradio_app.py` | Gradio Web 控制台 |
 
 ---
 

@@ -12,11 +12,18 @@
 """
 
 import pytest
-from app.graphs.workflow import (
-    agent_workflow, WorkflowState,
-    RouterNode, AnalyzeNode, ReviewNode, QaNode,
+from app.graphs.agent_router import (
+    AnalyzeNode,
+    QaNode,
+    ReviewNode,
+    RouterNode,
+    WorkflowState,
+    agent_router_workflow,
     classify_route,
 )
+
+# 兼容旧测试/导入名称
+agent_workflow = agent_router_workflow
 
 
 class TestWorkflow:
@@ -25,7 +32,7 @@ class TestWorkflow:
     def test_graph_has_all_nodes(self):
         """工作流图应注册 Router、Analyze、Review、Qa 四个节点。"""
         # node_defs 是图中所有节点定义的集合
-        node_names = set(agent_workflow.node_defs)
+        node_names = set(agent_router_workflow.node_defs)
         assert "RouterNode" in node_names
         assert "AnalyzeNode" in node_names
         assert "ReviewNode" in node_names

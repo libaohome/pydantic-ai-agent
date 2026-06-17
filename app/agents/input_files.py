@@ -1,14 +1,18 @@
-"""Agent 输入附件处理 — 解析 file_id 列表并预留读取入口。
+"""Agent 输入附件处理 — 解析 file_id 并注入 prompt。
 
-各 Agent 的 ``prepare_*_input`` 可调用本模块，将上传文件信息注入提示词；
-具体读取逻辑可在各 Agent 内按需调用 ``read_uploaded_files``。
+提供统一的 ``prepare_agent_input`` 入口：预读附件内容拼到 user_input 后，
+各 Agent 仅在需要时注册专属钩子（如 code_reviewer 的无代码提示）。
 """
 
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from app.core.uploads import UploadStore, get_upload_store
+
+if TYPE_CHECKING:
+    from app.agents.registry import AgentName
 
 _TEXT_SUFFIXES = {
     ".txt", ".md", ".json", ".csv", ".py", ".java", ".kt", ".go",
@@ -37,7 +41,7 @@ def format_file_ids_hint(file_ids: list[str], store: UploadStore | None = None) 
 
 
 def enrich_user_input_with_files(user_input: str, file_ids: list[str] | None) -> str:
-    """在用户文本后附加附件说明（不改变原始 user_input 语义）。"""
+    """在用户文本后附加附件说明（仅元信息，不预读内容）。"""
     if not file_ids:
         return user_input
     hint = format_file_ids_hint(file_ids)
@@ -45,6 +49,39 @@ def enrich_user_input_with_files(user_input: str, file_ids: list[str] | None) ->
     if not text:
         return hint
     return f"{text}\n\n{hint}"
+
+
+def _format_file_content_block(file_id: str, content: str) -> str:
+    """将单个附件格式化为 markdown 块。"""
+    return f"### 附件 `{file_id}`\n\n{content}"
+
+
+def inject_file_contents(user_input: str, file_ids: list[str] | None) -> str:
+    """预读附件文本，以 markdown 块拼到 user_input 后。"""
+    if not file_ids:
+        return user_input
+
+    text = user_input.strip()
+    blocks = [text] if text else []
+    for file_id, content in read_uploaded_files(file_ids).items():
+        blocks.append(_format_file_content_block(file_id, content))
+    return "\n\n".join(blocks)
+
+
+def prepare_agent_input(
+    agent_name: AgentName,
+    user_input: str,
+    file_ids: list[str] | None = None,
+) -> str:
+    """按 Agent 类型预处理用户输入：注入附件内容，并应用专属钩子。"""
+    from app.agents.registry import AgentName
+
+    text = inject_file_contents(user_input, file_ids)
+    if agent_name == AgentName.code_reviewer:
+        from app.agents.code_reviewer import apply_review_no_code_hint
+
+        return apply_review_no_code_hint(text, has_attachments=bool(file_ids))
+    return text
 
 
 def resolve_upload_path(file_id: str, store: UploadStore | None = None) -> Path:

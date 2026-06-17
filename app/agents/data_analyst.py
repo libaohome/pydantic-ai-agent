@@ -21,45 +21,42 @@ from app.core.llm import get_llm_manager
 from app.models.schemas import DataAnalysisOutput
 
 
-def prepare_analysis_input(user_input: str, file_ids: list[str] | None = None) -> str:
-    """预处理数据分析输入；附带 file_ids 时注入附件说明。
-
-    预留：可调用 ``read_uploaded_files(file_ids)`` 读取 CSV 等数据文件。
-    """
-    from app.agents.input_files import enrich_user_input_with_files
-
-    return enrich_user_input_with_files(user_input, file_ids)
-
-
 # ─── Agent 定义 ──────────────────────────────────
 
 data_analysis_agent = Agent[AgentDeps, DataAnalysisOutput](
     model=get_llm_manager().resolve_model_string("deepseek-chat"),
-    output_type=DataAnalysisOutput,  # 强制模型输出符合 DataAnalysisOutput  schema
+    output_type=DataAnalysisOutput,
     deps_type=AgentDeps,
+    retries=2,
     instructions="""你是一名数据分析师。你的任务：
 
-1. 理解用户的数据分析需求
-2. 使用数据库工具探索数据：
-   - 先用 list_tables 了解数据结构
-   - 再用 describe_table 查看表字段
-   - 最后用 execute_sql 执行查询
+1. 理解用户的数据分析需求，尽快输出 DataAnalysisOutput（不要无限调用工具）
+2. 数据库工具（名称必须准确）：
+   - `list_db_tables`：列出所有表（**最多调用 1 次**）
+   - `describe_db_table`：查看表结构（每张表 **最多 1 次**）
+   - `query_data`：执行 SELECT（**同类统计 SQL 不要重复执行**）
 
-3. 分析查询结果，生成：
-   - 清晰的分析结论
-   - 可视化图表规格（chart_type, title, data）
-   - SQL 查询记录
-   - 行动建议
+3. 推荐流程（一轮完成即可）：
+   list_db_tables → describe_db_table(conversations) → 用 1～3 条 SELECT 完成统计 → 输出结论
 
-4. 图表数据格式要求：
-   - bar/line: 需要 x_field, y_field, data 为 [{x, y}] 数组
-   - pie: data 为 [{name, value}] 数组
-   - table: data 为 [{col1, col2, ...}] 数组
+4. 分析查询结果，生成：
+   - analysis：清晰结论（表为空时明确写「当前无数据」）
+   - charts：可为空列表；无数据时用 table 展示 0 行说明
+   - sql_query：记录主要 SQL
+   - recommendations：行动建议
 
-安全规则：
-- 只能执行 SELECT 查询
-- 所有查询自动添加 LIMIT 防止返回过多数据
-- 不修改任何数据
+5. 图表数据格式：
+   - bar/line: x_field, y_field, data 为 [{x, y}]
+   - pie: data 为 [{name, value}]
+   - table: data 为 [{col1, col2, ...}]
+
+**重要（避免死循环）：**
+- 工具返回 Error: 或 SQL Error: 时，**不要**反复 list/describe/query；在 analysis 说明错误并结束
+- 查询结果为空 `[]` 是有效结果，直接写「无记录」并输出 DataAnalysisOutput
+- **总工具调用不超过 6 次**后必须输出最终结果
+- 禁止重复调用 list_db_tables / describe_db_table
+
+安全规则：仅 SELECT；不修改数据。
 """,
 )
 

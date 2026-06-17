@@ -32,53 +32,36 @@ _NO_CODE_HINT = (
 )
 
 
-def prepare_review_input(user_input: str, file_ids: list[str] | None = None) -> str:
-    """预处理审查输入：无具体代码时引导 Agent 直接作答。
-
-    若用户只问了方法论（如「Spring Boot 项目审查要点」）而没有贴代码，
-    则在输入末尾追加 ``_NO_CODE_HINT``，避免 Agent 盲目调用 Shell 类工具。
-    若附带 ``file_ids``，则注入附件说明；可在下方预留区预读文件内容。
-
-    Args:
-        user_input: 用户原始输入文本。
-        file_ids: 可选的上传文件 ID 列表。
-
-    Returns:
-        原样返回或追加提示后的输入字符串。
-    """
-    from app.agents.input_files import enrich_user_input_with_files
-
-    text = user_input.strip()  # 去掉首尾空白
-    if file_ids:
-        # 预留：按 file_id 预读附件并注入上下文（默认仅附加 file_id 说明）
-        # file_contents = read_uploaded_files(file_ids)
-        user_input = enrich_user_input_with_files(user_input, file_ids)
-        text = user_input.strip()
-
-    if not text:
-        return user_input  # 空输入直接返回，不做处理
-
-    if file_ids:
+def apply_review_no_code_hint(user_input: str, *, has_attachments: bool = False) -> str:
+    """无具体代码时追加提示，避免 Agent 盲目调用 Shell 类工具。"""
+    if has_attachments:
         return user_input
 
-    # 检测 Markdown 代码块标记
+    text = user_input.strip()
+    if not text:
+        return user_input
+
     has_code_block = "```" in text
-    # ``any(... for marker in (...))``：生成器表达式，任一 marker 出现在 text 中即为 True
     has_file_ref = any(
         marker in text
         for marker in (".java", ".kt", ".py", ".go", "src/", "pom.xml", "build.gradle")
     )
-    # 大段粘贴代码（多行且含典型代码特征）
     looks_like_code = text.count("\n") >= 8 and any(
         kw in text for kw in ("class ", "def ", "function ", "public ", "import ", "{")
     )
 
-    # 任一条件满足，说明用户提供了可审查的代码，无需追加提示
     if has_code_block or has_file_ref or looks_like_code:
         return user_input
 
-    # f-string：在字符串前加 f，花括号内可嵌入变量或表达式
     return f"{user_input}\n\n{_NO_CODE_HINT}"
+
+
+def prepare_review_input(user_input: str, file_ids: list[str] | None = None) -> str:
+    """预处理审查输入（兼容旧调用方）。"""
+    from app.agents.input_files import prepare_agent_input
+    from app.agents.registry import AgentName
+
+    return prepare_agent_input(AgentName.code_reviewer, user_input, file_ids)
 
 
 # ─── Agent 定义 ──────────────────────────────────

@@ -23,7 +23,7 @@ pip install pydantic-ai-skills
         from app.skills import SkillPackageManager, create_skill_aware_agent
 
         manager = SkillPackageManager()
-        agent = create_skill_aware_agent(model="openai:gpt-4o")
+        agent = create_skill_aware_agent(model="deepseek:deepseek-chat")
 """
 
 from app.skills.manager import SkillPackageManager, UploadResult, SkillListResult

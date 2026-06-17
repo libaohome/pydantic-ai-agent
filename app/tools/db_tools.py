@@ -54,11 +54,13 @@ async def execute_sql(
     try:
         result = await ctx.deps.db_session.execute(text(query))
         rows = result.mappings().all()  # 每行是类字典的 RowMapping
-        return json.dumps(
-            [dict(row) for row in rows],
-            default=str,           # 日期等不可序列化类型转字符串
-            ensure_ascii=False,
-        )
+        payload = [dict(row) for row in rows]
+        if not payload:
+            return json.dumps(
+                {"message": "查询成功，0 行记录", "rows": []},
+                ensure_ascii=False,
+            )
+        return json.dumps(payload, default=str, ensure_ascii=False)
     except Exception as e:
         return f"SQL Error: {e}"
 
@@ -83,6 +85,8 @@ async def list_tables(ctx: RunContext[AgentDeps]) -> str:
         text("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
     )
     tables = [row[0] for row in result]
+    if not tables:
+        return "（数据库中暂无用户表）"
     return "\n".join(tables)
 
 

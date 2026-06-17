@@ -20,8 +20,19 @@ Always call `load_skill("weather")` first, then run:
 - **`scripts/forecast.py`** — query weather for a city
   - `city` (required): e.g. `"北京"`, `"Beijing"`
   - `tomorrow` (optional, boolean): `true` for tomorrow's forecast
+  - `days` (optional, int 1-7): multi-day forecast; use `7` for "next week" / 下周
 
-Example:
+Example (next week rain):
+
+```text
+run_skill_script(
+  skill_name="weather",
+  script_name="scripts/forecast.py",
+  args={"city": "上海", "days": 7}
+)
+```
+
+Example (tomorrow):
 
 ```text
 run_skill_script(

@@ -22,6 +22,7 @@ FastAPI 的 ``Depends(get_session)`` 和 Pydantic AI 的 ``RunContext[AgentDeps]
 from __future__ import annotations
 
 # ``@dataclass`` 装饰器：自动生成 ``__init__``、``__repr__`` 等方法，减少样板代码
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -107,6 +108,16 @@ async def get_session() -> AsyncSession:
         yield session
 
 
+@asynccontextmanager
+async def db_session_scope():
+    """为 Agent 运行提供短生命周期的数据库会话（非 FastAPI 请求路径使用）。"""
+    if _session_factory is None:
+        await init_db()
+    assert _session_factory is not None
+    async with _session_factory() as session:
+        yield session
+
+
 # ─── Agent 依赖类型 ──────────────────────────────
 
 @dataclass
@@ -123,6 +134,7 @@ class AgentDeps:
     Attributes:
         tenant_id: 租户标识，多租户场景下区分不同客户。
         user_id: 当前用户标识。
+        session_id: 用户会话标识，同一用户的多轮对话归属。
         db_session: 可选的数据库会话，用于工具内持久化数据。
         request_id: 请求追踪 ID，便于日志关联。
         file_ids: 本次请求关联的上传文件 ID 列表（对应 data/upload 下文件名）。
@@ -131,6 +143,7 @@ class AgentDeps:
 
     tenant_id: str = "default"
     user_id: str = "anonymous"
+    session_id: str = "session01"
     # ``X | None`` 是 Python 3.10+ 的可选类型写法，等价于 ``Optional[X]``
     db_session: AsyncSession | None = None
     request_id: str = ""

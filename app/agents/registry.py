@@ -10,10 +10,6 @@
 - **注册表模式**：新增 Agent 时只需在此文件导入并加入 ``AGENTS`` 字典即可。
 """
 
-# ``from __future__ import annotations`` 让类型注解延迟求值，
-# 这样可以在类定义完成前就引用自身类型，且减少运行时开销。
-from __future__ import annotations
-
 from enum import Enum  # Enum：枚举基类，用于定义一组命名常量
 from typing import Any  # Any：表示「任意类型」，常用于输出类型不确定的场景
 
@@ -23,6 +19,7 @@ from app.core.deps import AgentDeps  # 自定义依赖注入容器（租户、�
 from app.agents.code_reviewer import code_review_agent
 from app.agents.data_analyst import data_analysis_agent
 from app.agents.qa_assistant import qa_agent
+from app.agents.chat_model import chat_model_agent
 
 
 class AgentName(str, Enum):
@@ -37,6 +34,7 @@ class AgentName(str, Enum):
     code_reviewer = "code-reviewer"   # 代码审查 Agent
     data_analyst = "data-analyst"     # 数据分析 Agent
     qa_assistant = "qa-assistant"     # 知识问答 Agent
+    chat_model = "chat-model"         # 通用对话（模型原生能力）
 
 
 # ─── Agent 注册表 ─────────────────────────────────
@@ -49,14 +47,15 @@ AGENTS: dict[AgentName, Agent[AgentDeps, Any]] = {
     AgentName.code_reviewer: code_review_agent,
     AgentName.data_analyst: data_analysis_agent,
     AgentName.qa_assistant: qa_agent,
+    AgentName.chat_model: chat_model_agent,
 }
 
 
-def get_agent(name: str | AgentName) -> Agent[AgentDeps, Any]:
+def get_agent(name: AgentName) -> Agent[AgentDeps, Any]:
     """根据名称获取 Agent 实例。
 
     Args:
-        name: Agent 名称，可以是字符串（如 ``"code-reviewer"``）或 ``AgentName`` 枚举。
+        name: ``AgentName`` 枚举。
 
     Returns:
         对应的 pydantic-ai ``Agent`` 实例。
@@ -65,10 +64,6 @@ def get_agent(name: str | AgentName) -> Agent[AgentDeps, Any]:
         ValueError: 当字符串名称不在 ``AgentName`` 枚举中时由 ``AgentName(name)`` 抛出。
         KeyError: 当枚举值在 ``AGENTS`` 字典中不存在时抛出。
     """
-    # ``str | AgentName`` 是 Python 3.10+ 的联合类型写法，表示参数可以是两种类型之一
-    if isinstance(name, str):
-        # 把字符串转成枚举，保证后续用 AGENTS[name] 时 key 类型一致
-        name = AgentName(name)
     return AGENTS[name]
 
 
@@ -82,10 +77,11 @@ def list_agents() -> list[dict[str, str]]:
     """
     return [
         {
-            "name": agent_name.value,  # 枚举的字符串值，如 "code-reviewer"
+            "name": agent_name,  # 枚举的字符串值，如 "code-reviewer"
             "model": str(agent.model),  # Agent 绑定的 LLM 模型标识
             # 若有结构化输出类型则取类名，否则默认为普通字符串 "str"
-            "output_type": agent.output_type.__name__ if agent.output_type else "str",
+            # "output_type": 只有 type 才有 __name__。
+            "output_type": agent.output_type.__name__ if isinstance(agent.output_type, type) else type(agent.output_type).__name__
         }
         for agent_name, agent in AGENTS.items()  # 字典推导式：遍历 key-value 对
     ]

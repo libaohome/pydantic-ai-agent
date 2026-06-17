@@ -21,6 +21,8 @@
 
 from __future__ import annotations
 
+from typing import Any, Literal
+
 # ``BaseModel``：Pydantic 基类，自动做类型校验与 JSON 序列化
 # ``Field``：为字段添加描述、默认值、校验规则（如 ge/le 范围）
 from pydantic import BaseModel, Field
@@ -38,6 +40,97 @@ class ErrorResponse(BaseModel):
 
     error: str
     detail: str = ""
+
+
+class AgentRunRequest(BaseModel):
+    """通用 Agent 运行请求（``POST /agents/{name}/agent`` 请求体）。"""
+
+    user_input: str = Field(description="传给 Agent 的用户输入文本")
+    tenant_id: str = Field(default="tenant01", description="租户 ID")
+    user_id: str = Field(default="user01", description="用户 ID")
+    session_id: str = Field(default="session01", description="会话 ID")
+    model_alias: str | None = Field(default=None, description="可选模型别名")
+    file_ids: list[str] = Field(default_factory=list, description="上传文件 ID 列表")
+
+
+class TokenUsage(BaseModel):
+    """Token 用量统计。"""
+
+    request_tokens: int = 0
+    response_tokens: int = 0
+
+
+class AgentRunResult(BaseModel):
+    """Agent 运行结果信封（success / error 字段结构一致）。"""
+
+    request_id: str
+    agent: str
+    tenant_id: str
+    user_id: str
+    session_id: str
+    status: Literal["success", "error"]
+    output: Any | None = None
+    error: str | None = None
+    usage: TokenUsage = Field(default_factory=TokenUsage)
+    cost_usd: float = 0.0
+    elapsed_seconds: float
+
+    @property
+    def is_success(self) -> bool:
+        return self.status == "success"
+
+
+class ChatMediaArtifact(BaseModel):
+    """ChatModelAgent 返回的生成媒体文件。"""
+
+    kind: Literal["image", "video", "audio", "file"] = "file"
+    path: str = Field(description="磁盘绝对路径")
+    mime_type: str = ""
+    file_id: str = ""
+
+
+class ChatModelOutput(BaseModel):
+    """ChatModelAgent 结构化输出。"""
+
+    text: str = Field(description="模型文本回复")
+    artifacts: list[ChatMediaArtifact] = Field(default_factory=list)
+
+
+class WorkflowRunRequest(BaseModel):
+    """通用 Workflow 运行请求（``POST /agents/{workflow_name}/workflow`` 请求体）。"""
+
+    user_input: str = Field(description="用户自然语言输入")
+    tenant_id: str = Field(default="tenant01", description="租户 ID")
+    user_id: str = Field(default="user01", description="用户 ID")
+    session_id: str = Field(default="session01", description="会话 ID")
+    file_ids: list[str] = Field(default_factory=list, description="上传文件 ID 列表")
+
+
+class WorkflowStateSnapshot(BaseModel):
+    """工作流执行后的状态摘要（各分支结果可能被截断）。"""
+
+    analysis_result: str | None = None
+    review_result: str | None = None
+    qa_result: str | None = None
+    error: str | None = None
+
+
+class WorkflowRunResult(BaseModel):
+    """Workflow 运行结果信封（success / error 字段结构一致）。"""
+
+    request_id: str
+    workflow: str
+    tenant_id: str
+    user_id: str
+    session_id: str
+    status: Literal["success", "error"]
+    state: WorkflowStateSnapshot
+    error: str | None = None
+    elapsed_seconds: float
+
+    @property
+    def is_success(self) -> bool:
+        return self.status == "success"
 
 
 # ─── 代码审查 Agent ────────────────────────────

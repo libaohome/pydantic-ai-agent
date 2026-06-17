@@ -1,14 +1,15 @@
 """
 Gradio Web 管理控制台模块。
 
-在 FastAPI 应用上挂载一个可视化界面（默认路径 /ui），提供四个 Tab：
+在 FastAPI 应用上挂载一个可视化界面（默认路径 /ui），提供五个 Tab：
 
-1. **Chat** — 与各类 Agent 对话，支持选择模型与会话导出
+1. **Chat** — 与 ChatModelAgent 多轮对话（模型原生文本/多模态/生图能力）
 2. **Agent** — 查看已注册 Agent 列表，并做单次测试调用
-3. **Model** — 展示模型注册表、API Key 状态与累计调用成本
-4. **Skills** — 上传/卸载 Skill ZIP，查看已安装列表
+3. **Workflow** — 查看已注册 Workflow 列表，并做单次测试调用
+4. **Model** — 展示模型注册表、API Key 状态与累计调用成本
+5. **Skills** — 上传/卸载 Skill ZIP，查看已安装列表
 
-技术栈：Gradio Blocks + 项目内已有的 _run_agent / SkillPackageManager API。
+技术栈：Gradio Blocks + 项目内已有的 run_agent / SkillPackageManager API。
 
 面向小白：
 - Gradio 用 Python 声明式构建网页 UI，无需写 HTML
@@ -29,25 +30,33 @@ import gradio as gr
 from fastapi import FastAPI
 
 from app.agents.registry import AgentName, list_agents
-from app.api.routes import _run_agent
+from app.agents import run_agent
+from app.graphs import WorkflowName, list_workflows, run_workflow
+from app.agents.chat_media import format_chat_model_output_markdown
 from app.core.config import get_settings
 from app.core.llm import MODEL_REGISTRY, get_llm_manager
 from app.core.uploads import get_upload_store
-from app.graphs.workflow import RouterNode, WorkflowState, agent_workflow
+from app.models.schemas import AgentRunRequest, AgentRunResult, WorkflowRunRequest, WorkflowRunResult
 from app.skills.routes import get_skill_manager
+from app.ui.agent_forms import (
+    DOMAIN_CHOICES,
+    LANGUAGE_CHOICES,
+    agent_form_visibility,
+    build_agent_user_input,
+)
 
 # Gradio 6 Chatbot 单条消息与历史记录的类型别名
 ChatMessage = dict[str, str]
 ChatHistory = list[ChatMessage]
+CHATBOT_HEIGHT = 420
 MultimodalInput = str | dict[str, Any] | None
 EMPTY_MULTIMODAL_INPUT: dict[str, str | list] = {"text": "", "files": []}
 
-# 下拉框显示名 → 内部 agent 标识
+# 下拉框显示名 → 内部 agent 标识（不含 workflow）
 AGENT_CHOICES: list[tuple[str, str]] = [
     ("知识问答 (qa-assistant)", "qa-assistant"),
     ("代码审查 (code-reviewer)", "code-reviewer"),
     ("数据分析 (data-analyst)", "data-analyst"),
-    ("自动路由 (workflow)", "workflow"),
 ]
 
 # 模型别名列表，来自 LLM 注册表
@@ -55,6 +64,18 @@ MODEL_CHOICES: list[str] = list(MODEL_REGISTRY.keys())
 
 # 反向映射：界面标签 → agent value
 AGENT_LABELS = {label: value for label, value in AGENT_CHOICES}
+
+
+def _workflow_choices() -> list[tuple[str, str]]:
+    """下拉框显示名 → 内部 workflow 标识。"""
+    return [
+        (f"{item['description']} ({item['name']})", item["name"])
+        for item in list_workflows()
+    ]
+
+
+def _workflow_labels() -> dict[str, str]:
+    return {label: value for label, value in _workflow_choices()}
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +90,9 @@ def _format_agent_output(output: Any, agent: str) -> str:
     """
     if not isinstance(output, dict):
         return str(output)
+
+    if agent == "chat-model":
+        return format_chat_model_output_markdown(output)
 
     if agent == "qa-assistant":
         lines = [output.get("answer", "")]
@@ -121,18 +145,43 @@ def _format_agent_output(output: Any, agent: str) -> str:
     return f"```json\n{json.dumps(output, ensure_ascii=False, indent=2)}\n```"
 
 
-def _format_run_meta(result: dict[str, Any]) -> str:
-    """
-    在回复末尾附加请求元信息：request_id、耗时、token、费用。
-    """
-    usage = result.get("usage") or {}
+def _format_run_meta(result: AgentRunResult) -> str:
+    """在回复末尾附加请求元信息：request_id、耗时、token、费用。"""
     return (
         f"\n\n---\n"
-        f"*request_id: {result.get('request_id')} | "
-        f"耗时: {result.get('elapsed_seconds')}s | "
-        f"tokens: {usage.get('request_tokens', 0)}+{usage.get('response_tokens', 0)} | "
-        f"cost: ${result.get('cost_usd', 0):.6f}*"
+        f"*request_id: {result.request_id} | "
+        f"session: {result.session_id} | "
+        f"耗时: {result.elapsed_seconds}s | "
+        f"tokens: {result.usage.request_tokens}+{result.usage.response_tokens} | "
+        f"cost: ${result.cost_usd:.6f}*"
     )
+
+
+def _append_chat_turn(history: ChatHistory, user: str, assistant: str) -> ChatHistory:
+    """向 Chatbot 历史追加一轮 user/assistant 消息。"""
+    return [
+        *history,
+        {"role": "user", "content": user},
+        {"role": "assistant", "content": assistant},
+    ]
+
+
+def _format_agent_test_user_message(
+    agent_label: str,
+    model_alias: str | None,
+    user_input: str,
+) -> str:
+    model = model_alias or "（默认）"
+    return f"**Agent:** {agent_label} | **模型:** `{model}`\n\n{user_input}"
+
+
+def _format_workflow_test_user_message(
+    workflow_label: str,
+    session_id: str,
+    test_input: str,
+) -> str:
+    session = (session_id or "").strip() or "session01"
+    return f"**Workflow:** {workflow_label} | **会话:** `{session}`\n\n{test_input}"
 
 
 def _resolve_gradio_file_ref(item: Any) -> tuple[str, str] | None:
@@ -209,55 +258,63 @@ def _format_user_message(text: str, file_ids: list[str]) -> str:
     return f"📎 附件: {attachment}"
 
 
+def _format_workflow_result(result: WorkflowRunResult) -> str:
+    """将 Workflow 运行结果格式化为 Markdown。"""
+    ws = result.state
+    parts: list[str] = []
+    if ws.qa_result:
+        parts.append(f"**问答结果:**\n{ws.qa_result}")
+    if ws.review_result:
+        parts.append(f"**审查结果:**\n{ws.review_result}")
+    if ws.analysis_result:
+        parts.append(f"**分析结果:**\n{ws.analysis_result}")
+    if ws.error:
+        parts.append(f"**错误:** {ws.error}")
+    body = "\n\n".join(parts) if parts else "工作流未产生输出"
+    return (
+        f"{body}\n\n---\n"
+        f"*request_id: {result.request_id} | session: {result.session_id} | "
+        f"耗时: {result.elapsed_seconds}s | 模式: 自动路由*"
+    )
+
+
 async def _run_chat_agent(
     message: str,
     agent_value: str,
     model_alias: str | None,
     file_ids: list[str] | None = None,
+    session_id: str | None = None,
 ) -> str:
     """
     执行一次 Chat/Agent 调用，返回 Markdown 字符串。
 
     参数:
             message: 用户输入
-            agent_value: 内部 agent 名或 "workflow"
+            agent_value: 内部 agent 名（如 qa-assistant）
             model_alias: 模型别名，None 则用各 Agent 默认模型
             file_ids: 可选的上传文件 ID 列表
+            session_id: 会话名称，对应 UI「会话名称」输入框
 
-    workflow 模式走 LangGraph 工作流，其余走 _run_agent。
+    workflow 模式已移至 Workflow Tab；此处仅调用 run_agent。
     """
     model = model_alias if model_alias else None
     ids = file_ids or []
-
-    if agent_value == "workflow":
-        start = time.time()
-        state = WorkflowState(user_input=message, file_ids=ids)
-        result = await agent_workflow.run(start_node=RouterNode(), state=state)
-        ws = result.state
-        elapsed = round(time.time() - start, 3)
-        parts: list[str] = []
-        if ws.qa_result:
-            parts.append(f"**问答结果:**\n{ws.qa_result}")
-        if ws.review_result:
-            parts.append(f"**审查结果:**\n{ws.review_result}")
-        if ws.analysis_result:
-            parts.append(f"**分析结果:**\n{ws.analysis_result}")
-        if ws.error:
-            parts.append(f"**错误:** {ws.error}")
-        body = "\n\n".join(parts) if parts else "工作流未产生输出"
-        return f"{body}\n\n---\n*耗时: {elapsed}s | 模式: 自动路由*"
+    session = (session_id or "").strip() or "session01"
 
     agent_name = AgentName(agent_value)
-    result = await _run_agent(
+    result = await run_agent(
         agent_name,
-        user_input=message,
-        model_alias=model,
-        file_ids=ids,
+        AgentRunRequest(
+            user_input=message,
+            session_id=session,
+            model_alias=model,
+            file_ids=ids,
+        ),
     )
-    if result["status"] == "error":
-        return f"❌ **错误:** {result['error']}{_format_run_meta(result)}"
+    if not result.is_success:
+        return f"❌ **错误:** {result.error}{_format_run_meta(result)}"
 
-    output = result["output"]
+    output = result.output
     body = _format_agent_output(output, agent_value)
     return f"{body}{_format_run_meta(result)}"
 
@@ -365,6 +422,7 @@ def refresh_skills() -> tuple[str, gr.Dropdown]:
 
 def _models_to_dataframe() -> list[list[str]]:
     """将 MODEL_REGISTRY 转为 Gradio Dataframe 所需的二维列表。"""
+    llm = get_llm_manager()
     rows: list[list[str]] = []
     for alias, cfg in MODEL_REGISTRY.items():
         key_ok = "✅" if (not cfg.api_key_env or os.environ.get(cfg.api_key_env)) else "❌"
@@ -372,7 +430,7 @@ def _models_to_dataframe() -> list[list[str]]:
             alias,
             cfg.provider,
             cfg.model_id,
-            cfg.base_url or "-",
+            llm._get_base_url(cfg.credential_group) if cfg.credential_group else "-",
             "是" if cfg.reasoning else "否",
             f"${cfg.cost_per_1m_input:.2f}",
             f"${cfg.cost_per_1m_output:.2f}",
@@ -418,33 +476,126 @@ def _agents_to_markdown() -> str:
 
 async def run_agent_test(
     agent_label: str,
-    test_input: str,
     model_alias: str | None,
-) -> str:
+    question: str,
+    domain: str,
+    code: str,
+    language: str,
+    context: str,
+    query: str,
+    data_source: str,
+    history: ChatHistory,
+) -> ChatHistory:
     """
     Agent 测试 Tab 的运行按钮回调。
 
-    与 Chat 类似，但错误时额外输出完整 JSON 便于调试。
+    根据所选 Agent 读取对应结构化字段，组装为 user_input 后调用 run_agent。
     """
-    if not test_input.strip():
-        return "请输入测试内容"
-
     agent_value = AGENT_LABELS.get(agent_label, "qa-assistant")
-    if agent_value == "workflow":
-        return await _run_chat_agent(test_input, agent_value, model_alias)
+    user_input, err = build_agent_user_input(
+        agent_value,
+        question=question,
+        domain=domain,
+        code=code,
+        language=language,
+        context=context,
+        query=query,
+        data_source=data_source,
+    )
+    if err:
+        return _append_chat_turn(
+            history,
+            _format_agent_test_user_message(agent_label, model_alias, "（输入校验失败）"),
+            f"⚠️ {err}",
+        )
 
     agent_name = AgentName(agent_value)
-    result = await _run_agent(
+    result = await run_agent(
         agent_name,
-        user_input=test_input,
-        model_alias=model_alias if model_alias else None,
+        AgentRunRequest(
+            user_input=user_input,
+            model_alias=model_alias if model_alias else None,
+        ),
     )
-    if result["status"] == "error":
-        err_json = json.dumps(result, ensure_ascii=False, indent=2)
-        return f"❌ {result['error']}\n\n```json\n{err_json}\n```"
+    user_message = _format_agent_test_user_message(agent_label, model_alias, user_input)
+    if not result.is_success:
+        err_json = json.dumps(result.model_dump(), ensure_ascii=False, indent=2)
+        return _append_chat_turn(
+            history,
+            user_message,
+            f"❌ {result.error}\n\n```json\n{err_json}\n```",
+        )
 
-    formatted = _format_agent_output(result["output"], agent_value)
-    return f"{formatted}{_format_run_meta(result)}"
+    formatted = _format_agent_output(result.output, agent_value)
+    return _append_chat_turn(history, user_message, f"{formatted}{_format_run_meta(result)}")
+
+
+def switch_agent_input_form(agent_label: str) -> tuple[gr.update, gr.update, gr.update]:
+    """切换 Agent 输入区各字段分组的可见性（Chat / Agent 测试共用）。"""
+    agent_value = AGENT_LABELS.get(agent_label, "qa-assistant")
+    show_qa, show_review, show_analyst = agent_form_visibility(agent_value)
+    return (
+        gr.update(visible=show_qa),
+        gr.update(visible=show_review),
+        gr.update(visible=show_analyst),
+    )
+
+
+# 保持旧名称兼容测试/引用
+switch_agent_test_form = switch_agent_input_form
+
+
+# ─── Workflow 管理 ───────────────────────────────
+
+def _workflows_to_markdown() -> str:
+    """将 list_workflows() 结果格式化为 Markdown 表格。"""
+    workflows = list_workflows()
+    lines = ["| Workflow | 说明 |", "|----------|------|"]
+    for item in workflows:
+        lines.append(f"| {item['name']} | {item['description']} |")
+    return "\n".join(lines)
+
+
+async def run_workflow_test(
+    workflow_label: str,
+    test_input: str,
+    session_id: str,
+    history: ChatHistory,
+) -> ChatHistory:
+    """Workflow 测试 Tab 的运行按钮回调。"""
+    if not test_input.strip():
+        return _append_chat_turn(
+            history,
+            _format_workflow_test_user_message(workflow_label, session_id, "（空输入）"),
+            "⚠️ 请输入测试内容",
+        )
+
+    labels = _workflow_labels()
+    workflow_value = labels.get(workflow_label, WorkflowName.agent_router.value)
+    session = (session_id or "").strip() or "session01"
+    user_message = _format_workflow_test_user_message(workflow_label, session_id, test_input)
+
+    result = await run_workflow(
+        WorkflowName(workflow_value),
+        WorkflowRunRequest(user_input=test_input, session_id=session),
+    )
+    if not result.is_success:
+        err_json = json.dumps(result.model_dump(), ensure_ascii=False, indent=2)
+        return _append_chat_turn(
+            history,
+            user_message,
+            f"❌ {result.error}\n\n```json\n{err_json}\n```",
+        )
+
+    return _append_chat_turn(history, user_message, _format_workflow_result(result))
+
+
+def clear_agent_test_history() -> ChatHistory:
+    return []
+
+
+def clear_workflow_test_history() -> ChatHistory:
+    return []
 
 
 # ─── Chat 管理 ───────────────────────────────────
@@ -452,20 +603,21 @@ async def run_agent_test(
 async def chat_submit(
     message: MultimodalInput,
     history: ChatHistory,
-    agent_label: str,
     model_alias: str | None,
+    session_name: str,
 ) -> tuple[ChatHistory, MultimodalInput]:
-    """
-    发送聊天消息：保存附件、追加 user/assistant 两条记录，并清空输入框。
-
-    Gradio 要求返回 (更新后的 history, 清空的 input)。
-    """
+    """发送聊天消息（ChatModelAgent），追加对话记录并清空输入框。"""
     text, file_ids = _save_multimodal_uploads(message)
     if not text and not file_ids:
         return history, EMPTY_MULTIMODAL_INPUT
 
-    agent_value = AGENT_LABELS.get(agent_label, "qa-assistant")
-    reply = await _run_chat_agent(text, agent_value, model_alias, file_ids=file_ids)
+    reply = await _run_chat_agent(
+        text,
+        AgentName.chat_model.value,
+        model_alias,
+        file_ids=file_ids,
+        session_id=session_name,
+    )
     display_message = _format_user_message(text, file_ids)
     history = [
         *history,
@@ -483,7 +635,7 @@ def clear_chat() -> tuple[ChatHistory, MultimodalInput, str]:
 def export_chat(history: ChatHistory, session_name: str) -> str:
     """将当前对话导出为 JSON 字符串。"""
     payload = {
-        "session": session_name or "default",
+        "session": session_name or "session01",
         "messages": history,
         "exported_at": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
@@ -502,18 +654,17 @@ def create_gradio_demo() -> gr.Blocks:
     with gr.Blocks(title="Pydantic AI Agent Console") as demo:
         gr.Markdown(
             "# 🤖 Pydantic AI Agent Console\n"
-            "Chat · Agent · Model · Skills 统一管理界面"
+            "Chat · Agent · Workflow · Model · Skills 统一管理界面"
         )
 
         with gr.Tabs():
-            # ── Chat Tab：多轮对话 ──
+            # ── Chat Tab：多轮对话（qa-assistant + 模型切换）──
             with gr.Tab("💬 Chat"):
+                gr.Markdown(
+                    "与 **chat-model** 对话：纯模型原生能力（文本 / 多模态理解 / 生图），"
+                    "不调用 Skill 或知识库。测试业务 Agent 请使用 **Agent** 标签页。"
+                )
                 with gr.Row():
-                    chat_agent = gr.Dropdown(
-                        choices=[label for label, _ in AGENT_CHOICES],
-                        value=AGENT_CHOICES[0][0],
-                        label="Agent 模式",
-                    )
                     chat_model = gr.Dropdown(
                         choices=MODEL_CHOICES,
                         value=MODEL_CHOICES[0],
@@ -522,10 +673,10 @@ def create_gradio_demo() -> gr.Blocks:
                     )
                     session_name = gr.Textbox(
                         label="会话名称",
-                        placeholder="default",
+                        placeholder="session01",
                         scale=1,
                     )
-                chatbot = gr.Chatbot(label="对话", height=420)
+                chatbot = gr.Chatbot(label="对话", height=CHATBOT_HEIGHT)
                 with gr.Row():
                     chat_input = gr.MultimodalTextbox(
                         label="输入消息",
@@ -537,6 +688,7 @@ def create_gradio_demo() -> gr.Blocks:
                         ],
                         file_count="multiple",
                         sources=["upload"],
+                        submit_btn=False,
                         scale=4,
                     )
                     chat_send = gr.Button("发送", variant="primary", scale=1)
@@ -551,12 +703,12 @@ def create_gradio_demo() -> gr.Blocks:
 
                 chat_send.click(
                     chat_submit,
-                    inputs=[chat_input, chatbot, chat_agent, chat_model],
+                    inputs=[chat_input, chatbot, chat_model, session_name],
                     outputs=[chatbot, chat_input],
                 )
                 chat_input.submit(
                     chat_submit,
-                    inputs=[chat_input, chatbot, chat_agent, chat_model],
+                    inputs=[chat_input, chatbot, chat_model, session_name],
                     outputs=[chatbot, chat_input],
                 )
                 chat_clear.click(clear_chat, outputs=[chatbot, chat_input, chat_export_box])
@@ -585,19 +737,118 @@ def create_gradio_demo() -> gr.Blocks:
                         value=MODEL_CHOICES[0],
                         label="模型",
                     )
-                test_input = gr.Textbox(
-                    label="测试输入",
-                    lines=4,
-                    placeholder="输入测试内容，例如：查询北京明天天气",
-                )
-                test_run = gr.Button("运行测试", variant="primary")
-                test_output = gr.Markdown(label="测试结果")
 
+                with gr.Group(visible=True) as qa_input_group:
+                    gr.Markdown("**知识问答** — 对应 `QaInput`")
+                    test_question = gr.Textbox(
+                        label="问题 (question)",
+                        lines=3,
+                        placeholder="例如：什么是 RAG 技术？",
+                    )
+                    test_domain = gr.Dropdown(
+                        choices=DOMAIN_CHOICES,
+                        value="general",
+                        label="领域 (domain)",
+                    )
+
+                with gr.Group(visible=False) as review_input_group:
+                    gr.Markdown("**代码审查** — 对应 `CodeReviewInput`")
+                    test_code = gr.Textbox(
+                        label="源代码 (code)",
+                        lines=10,
+                        placeholder="粘贴待审查的代码",
+                    )
+                    with gr.Row():
+                        test_language = gr.Dropdown(
+                            choices=LANGUAGE_CHOICES,
+                            value="python",
+                            label="编程语言 (language)",
+                        )
+                    test_context = gr.Textbox(
+                        label="额外上下文 (context)",
+                        lines=2,
+                        placeholder="例如：PR #42 新增数学工具函数",
+                    )
+
+                with gr.Group(visible=False) as analyst_input_group:
+                    gr.Markdown("**数据分析** — 对应 `DataAnalysisInput`")
+                    test_query = gr.Textbox(
+                        label="分析需求 (query)",
+                        lines=3,
+                        placeholder="例如：统计每个部门的平均薪资",
+                    )
+                    test_data_source = gr.Textbox(
+                        label="数据源 (data_source)",
+                        placeholder="例如：hr_db",
+                    )
+
+                test_run = gr.Button("运行测试", variant="primary")
+                test_output = gr.Chatbot(label="测试记录", height=CHATBOT_HEIGHT)
+                test_clear = gr.Button("清空记录")
+
+                test_agent.change(
+                    switch_agent_input_form,
+                    inputs=[test_agent],
+                    outputs=[qa_input_group, review_input_group, analyst_input_group],
+                )
                 test_run.click(
                     run_agent_test,
-                    inputs=[test_agent, test_input, test_model],
+                    inputs=[
+                        test_agent,
+                        test_model,
+                        test_question,
+                        test_domain,
+                        test_code,
+                        test_language,
+                        test_context,
+                        test_query,
+                        test_data_source,
+                        test_output,
+                    ],
                     outputs=[test_output],
                 )
+                test_clear.click(clear_agent_test_history, outputs=[test_output])
+
+            # ── Workflow Tab：列表与单次测试 ──
+            with gr.Tab("🔀 Workflow"):
+                gr.Markdown("### 已注册 Workflow")
+                workflow_table = gr.Markdown(value=_workflows_to_markdown())
+                workflow_refresh = gr.Button("刷新列表")
+                workflow_refresh.click(lambda: _workflows_to_markdown(), outputs=[workflow_table])
+
+                gr.Markdown("### Workflow 测试")
+                workflow_choice_list = _workflow_choices()
+                with gr.Row():
+                    test_workflow = gr.Dropdown(
+                        choices=[label for label, _ in workflow_choice_list],
+                        value=workflow_choice_list[0][0] if workflow_choice_list else None,
+                        label="选择 Workflow",
+                    )
+                    test_workflow_session = gr.Textbox(
+                        label="会话名称",
+                        placeholder="session01",
+                        scale=1,
+                    )
+                test_workflow_input = gr.Textbox(
+                    label="测试输入",
+                    lines=4,
+                    placeholder="输入测试内容，例如：帮我审查这段代码有没有 bug",
+                )
+                test_workflow_run = gr.Button("运行测试", variant="primary")
+                test_workflow_output = gr.Chatbot(label="测试记录", height=CHATBOT_HEIGHT)
+                test_workflow_clear = gr.Button("清空记录")
+
+                test_workflow_run.click(
+                    run_workflow_test,
+                    inputs=[
+                        test_workflow,
+                        test_workflow_input,
+                        test_workflow_session,
+                        test_workflow_output,
+                    ],
+                    outputs=[test_workflow_output],
+                )
+                test_workflow_clear.click(clear_workflow_test_history, outputs=[test_workflow_output])
 
             # ── Model Tab：注册表与成本 ──
             with gr.Tab("🧠 Model"):

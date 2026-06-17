@@ -6,7 +6,7 @@ requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.10,<3",
     "pydantic-ai>=1.0,<2",
-    "pydantic-ai-slim[openai,anthropic,google,ollama,mcp]>=1.0,<2",
+    "pydantic-ai-slim[openai,mcp]>=1.0,<2",
     "pydantic-ai-skills>=0.1,<1",
     "pydantic-graph>=1.0,<2",
     "fastapi>=0.115,<1",
@@ -53,7 +53,7 @@ strict = true
 
 [tool.pyright]
 pythonVersion = "3.12"
-include = ["app", "tests", "scripts", "startup.py"]
+include = ["app", "tests", "scripts"]
 extraPaths = ["."]
 venvPath = "/opt/miniconda3/envs"
 venv = "py312"

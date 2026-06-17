@@ -51,7 +51,7 @@ def create_skills_capability(
             from app.skills import create_skills_capability
 
             agent = Agent(
-                    model='openai:gpt-5.2',
+                    model='deepseek:deepseek-chat',
                     instructions='You are a helpful assistant.',
                     capabilities=[create_skills_capability('./skills')],
             )
@@ -94,7 +94,7 @@ def create_skills_toolset(
 
             toolset = create_skills_toolset('./skills')
             agent = Agent(
-                    model='openai:gpt-5.2',
+                    model='deepseek:deepseek-chat',
                     toolsets=[toolset],
             )
     """
@@ -123,7 +123,7 @@ def create_skill_aware_agent(
     一步创建已集成 Skill 能力的 Agent。
 
     参数:
-            model: 模型标识，如 'openai:gpt-4o'
+            model: 模型标识，如 'deepseek:deepseek-chat'
             instructions: Agent 系统提示词
             skills_dir: Skill 目录，默认 app/skills/
             use_capability: True 用 Capability，False 用 Toolset
@@ -137,7 +137,7 @@ def create_skill_aware_agent(
             from app.skills import create_skill_aware_agent
 
             agent = create_skill_aware_agent(
-                    model='openai:gpt-5.2',
+                    model='deepseek:deepseek-chat',
                     instructions='You are a coding assistant.',
                     skills_dir='./skills',
             )

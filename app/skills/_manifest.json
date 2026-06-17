@@ -7,7 +7,7 @@
     "uploaded_at": "2026-06-15T18:42:47.222655",
     "uploaded_by": "anonymous",
     "file_count": 3,
-    "has_scripts": false,
+    "has_scripts": true,
     "has_resources": false,
     "checksum": "ed9fe28116930928"
   },
@@ -28,11 +28,11 @@
     "version": "1.0.0",
     "author": "tester",
     "category": "test",
-    "uploaded_at": "2026-06-16T19:04:33.606931",
+    "uploaded_at": "2026-06-17T16:21:26.460765",
     "uploaded_by": "tester",
     "file_count": 3,
     "has_scripts": true,
     "has_resources": true,
-    "checksum": "af738b3a81f57456"
+    "checksum": "8dfaa6c419ab7805"
   }
 }

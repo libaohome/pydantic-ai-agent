@@ -23,31 +23,28 @@ from app.models.schemas import QaOutput
 from app.skills.integration import create_skills_toolset  # 创建 Skills 工具集工厂函数
 
 
-def prepare_qa_input(user_input: str, file_ids: list[str] | None = None) -> str:
-    """预处理问答输入；附带 file_ids 时注入附件说明。
-
-    预留：可调用 ``read_uploaded_files(file_ids)`` 预读文本附件。
-    """
-    from app.agents.input_files import enrich_user_input_with_files
-
-    return enrich_user_input_with_files(user_input, file_ids)
-
-
 # ─── Agent 定义 ──────────────────────────────────
 
 qa_agent = Agent[AgentDeps, QaOutput](
     model=get_llm_manager().resolve_model_string("deepseek-chat"),
     output_type=QaOutput,
     deps_type=AgentDeps,
-    toolsets=[create_skills_toolset()],  # 列表形式注册工具集，与下方 @tool 可并存
+    retries=2,
+    toolsets=[create_skills_toolset()],
     instructions="""你是一名知识问答助手。你的任务：
 
-1. 理解用户的问题
-2. 若用户提到 skill，先 `load_skill`，再用 `run_skill_script` 执行脚本（**不要**用 `read_skill_resource` 读 `.py` 脚本）
-3. `run_skill_script` 的 `script_name` 必须与 `load_skill` 返回的脚本名完全一致（如 `scripts/detect.py`）
-3. 否则搜索内部知识库获取相关信息
-4. 如需补充，可搜索互联网
-5. 综合信息生成回答
+1. 理解用户的问题并尽快给出最终结构化回答（QaOutput）
+2. **天气问题**（气温、下雨、预报）：优先调用 `get_weather_forecast` 一次即可
+   - 问「下周」「未来几天」：days=7
+   - 问「明天」：tomorrow=true
+   - 问「现在/今天」：默认 days=1
+3. 其他 Skill 任务：先 `load_skill`，再 `run_skill_script`（**每个 skill 最多调用 1 次脚本**）
+4. 知识库/联网仅作补充，各最多调用 1 次
+
+**重要（避免死循环）：**
+- 同一工具失败或结果已足够时，**不要重复调用**
+- 禁止对同一问题反复 `load_skill` / `run_skill_script`
+- 工具调用不超过 3 次后必须输出 QaOutput；无法确定则说明局限并降低置信度
 
 回答要求：
 - 准确、简洁、有据可查
@@ -55,7 +52,7 @@ qa_agent = Agent[AgentDeps, QaOutput](
 - 给出置信度评估
 - 提供 2-3 个追问建议
 
-如果知识库和互联网都找不到相关信息：
+如果找不到相关信息：
 - 明确告知用户
 - 置信度设为 0
 - 建议用户咨询领域专家
@@ -64,6 +61,34 @@ qa_agent = Agent[AgentDeps, QaOutput](
 
 
 # ─── 注册工具 ──────────────────────────────────
+
+@qa_agent.tool
+async def get_weather_forecast(
+    ctx: RunContext[AgentDeps],
+    city: str,
+    days: int = 1,
+    tomorrow: bool = False,
+) -> str:
+    """查询城市天气与预报（无需 load_skill）。
+
+    Args:
+        city: 城市名，如「上海」「Beijing」
+        days: 预报天数 1-7；用户问「下周」「未来几天」时用 7
+        tomorrow: True 时仅返回明日预报（与 days 互斥时优先 tomorrow）
+
+    Returns:
+        JSON 字符串，含 daily 预报或 will_rain_in_period 等字段
+    """
+    import json
+
+    from app.skills.weather.scripts.forecast import get_forecast
+
+    if tomorrow:
+        result = get_forecast(city, days=1, tomorrow=True)
+    else:
+        result = get_forecast(city, days=max(1, min(days, 7)))
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
 
 @qa_agent.tool
 async def search_kb(ctx: RunContext[AgentDeps], query: str, top_k: int = 5) -> str:
