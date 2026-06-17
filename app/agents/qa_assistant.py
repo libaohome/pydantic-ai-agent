@@ -7,8 +7,7 @@
 4. 返回 ``QaOutput`` 结构化结果（答案、来源、置信度、追问建议）
 
 面向小白的关键概念：
-- **toolsets**：与单个 ``@agent.tool`` 不同，toolsets 是一组预打包工具的集合
-  （此处通过 ``create_skills_toolset()`` 注入 Skills 相关工具）。
+- **capabilities**：Pydantic AI 的扩展点，通过 ``create_skills_capability()`` 挂载 Skills 能力。
 - **Skills**：项目中的可扩展技能模块，Agent 可先 ``load_skill`` 再 ``run_skill_script``。
 - **置信度**：模型对自身回答可靠程度的评估，0 表示完全不确定。
 """
@@ -20,7 +19,7 @@ from pydantic_ai import Agent, RunContext
 from app.core.deps import AgentDeps
 from app.core.llm import get_llm_manager
 from app.models.schemas import QaOutput
-from app.skills.integration import create_skills_toolset  # 创建 Skills 工具集工厂函数
+from app.skills.integration import create_skills_capability
 
 
 # ─── Agent 定义 ──────────────────────────────────
@@ -30,7 +29,7 @@ qa_agent = Agent[AgentDeps, QaOutput](
     output_type=QaOutput,
     deps_type=AgentDeps,
     retries=2,
-    toolsets=[create_skills_toolset()],
+    capabilities=[create_skills_capability()],
     instructions="""你是一名知识问答助手。你的任务：
 
 1. 理解用户的问题并尽快给出最终结构化回答（QaOutput）

@@ -676,7 +676,7 @@ def create_gradio_demo() -> gr.Blocks:
                         placeholder="session01",
                         scale=1,
                     )
-                chatbot = gr.Chatbot(label="对话", height=CHATBOT_HEIGHT)
+                chatbot = gr.Chatbot(label="对话", height=CHATBOT_HEIGHT, type="messages")
                 with gr.Row():
                     chat_input = gr.MultimodalTextbox(
                         label="输入消息",
@@ -783,7 +783,7 @@ def create_gradio_demo() -> gr.Blocks:
                     )
 
                 test_run = gr.Button("运行测试", variant="primary")
-                test_output = gr.Chatbot(label="测试记录", height=CHATBOT_HEIGHT)
+                test_output = gr.Chatbot(label="测试记录", height=CHATBOT_HEIGHT, type="messages")
                 test_clear = gr.Button("清空记录")
 
                 test_agent.change(
@@ -835,7 +835,7 @@ def create_gradio_demo() -> gr.Blocks:
                     placeholder="输入测试内容，例如：帮我审查这段代码有没有 bug",
                 )
                 test_workflow_run = gr.Button("运行测试", variant="primary")
-                test_workflow_output = gr.Chatbot(label="测试记录", height=CHATBOT_HEIGHT)
+                test_workflow_output = gr.Chatbot(label="测试记录", height=CHATBOT_HEIGHT, type="messages")
                 test_workflow_clear = gr.Button("清空记录")
 
                 test_workflow_run.click(

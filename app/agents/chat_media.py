@@ -94,7 +94,7 @@ def build_chat_user_prompt(
         elif suffix in _IMAGE_SUFFIXES | _VIDEO_SUFFIXES | _AUDIO_SUFFIXES:
             parts.append(
                 f"[媒体附件 `{meta.original_name}`：当前模型 `{alias}` 不支持该媒体类型，"
-                f"请换用支持多模态的模型（如 sensenova-6.7-flash-lite）或上传文本文件。]"
+                f"请换用支持多模态的模型（如 sensenova-6.7-flash-lite、cohere-command-a-plus）或上传文本文件。]"
             )
         else:
             parts.append(

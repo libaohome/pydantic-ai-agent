@@ -12,7 +12,6 @@ from pydantic_ai.usage import UsageLimits
 from app.agents.input_files import prepare_agent_input
 from app.agents.chat_media import (
     build_chat_user_prompt,
-    get_chat_builtin_tools,
     resolve_chat_model_alias,
     run_sensenova_image_generation,
     serialize_chat_model_result,
@@ -77,8 +76,6 @@ async def run_agent(agent_name: AgentName, request: AgentRunRequest) -> AgentRun
         )
 
         run_kwargs: dict[str, Any] = {"deps": deps}
-        if agent_name == AgentName.chat_model:
-            run_kwargs["builtin_tools"] = get_chat_builtin_tools(request.model_alias)
         if agent_name == AgentName.data_analyst:
             run_kwargs["usage_limits"] = UsageLimits(request_limit=12, tool_calls_limit=8)
 
@@ -119,10 +116,10 @@ async def run_agent(agent_name: AgentName, request: AgentRunRequest) -> AgentRun
                 output_data = serialize_chat_model_result(result)
             else:
                 output_data = _serialize_output(result.output)
-            usage = result.usage()
+            usage = result.usage
             token_usage = TokenUsage(
-                request_tokens=usage.request_tokens if usage else 0,
-                response_tokens=usage.response_tokens if usage else 0,
+                request_tokens=usage.input_tokens if usage else 0,
+                response_tokens=usage.output_tokens if usage else 0,
             )
             cost_alias = effective_alias or get_llm_manager()._default_alias()
             cost = get_llm_manager().track_cost(

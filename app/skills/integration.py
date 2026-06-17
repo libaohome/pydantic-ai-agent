@@ -24,9 +24,8 @@ Skill 与 Pydantic AI Agent 的集成模块。
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import Agent
 
 
 def create_skills_capability(
@@ -116,49 +115,14 @@ def create_skill_aware_agent(
     model: str,
     instructions: str = "You are a helpful assistant.",
     skills_dir: Path | str | None = None,
-    use_capability: bool = True,
     **agent_kwargs,
 ) -> Agent:
-    """
-    一步创建已集成 Skill 能力的 Agent。
-
-    参数:
-            model: 模型标识，如 'deepseek:deepseek-chat'
-            instructions: Agent 系统提示词
-            skills_dir: Skill 目录，默认 app/skills/
-            use_capability: True 用 Capability，False 用 Toolset
-            **agent_kwargs: 传给 Agent() 的其余关键字参数
-
-    返回:
-            配置好的 pydantic_ai.Agent 实例
-
-    用法示例::
-
-            from app.skills import create_skill_aware_agent
-
-            agent = create_skill_aware_agent(
-                    model='deepseek:deepseek-chat',
-                    instructions='You are a coding assistant.',
-                    skills_dir='./skills',
-            )
-
-            result = await agent.run('帮我审查这段代码')
-    """
+    """一步创建已集成 Skill capabilities 的 Agent。"""
     skills_path = skills_dir or Path(__file__).parent
-
-    if use_capability:
-        capability = create_skills_capability(skills_path)
-        return Agent(
-            model=model,
-            instructions=instructions,
-            capabilities=[capability],
-            **agent_kwargs,
-        )
-    else:
-        toolset = create_skills_toolset(skills_path)
-        return Agent(
-            model=model,
-            instructions=instructions,
-            toolsets=[toolset],
-            **agent_kwargs,
-        )
+    capability = create_skills_capability(skills_path)
+    return Agent(
+        model=model,
+        instructions=instructions,
+        capabilities=[capability],
+        **agent_kwargs,
+    )

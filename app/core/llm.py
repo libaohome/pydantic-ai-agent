@@ -14,9 +14,11 @@ ModelAlias = Literal[
     "agnes-2.0-flash",
     "sensenova-6.7-flash-lite",
     "sensenova-u1-fast",
+    "cohere-command-a-plus",
+    "cf-glm-5.2",
 ]
 
-CredentialGroup = Literal["longcat", "agnesai", "sensenova"]
+CredentialGroup = Literal["longcat", "agnesai", "sensenova", "cohere", "cloudflare"]
 
 
 @dataclass
@@ -39,6 +41,8 @@ _CREDENTIAL_FIELDS: dict[CredentialGroup, tuple[str, str]] = {
     "longcat": ("longcat_api_key", "longcat_base_url"),
     "agnesai": ("agnesai_api_key", "agnesai_base_url"),
     "sensenova": ("sensenova_api_key", "sensenova_base_url"),
+    "cohere": ("cohere_api_key", "cohere_base_url"),
+    "cloudflare": ("cloudflare_api_key", "cloudflare_base_url"),
 }
 
 MODEL_REGISTRY: dict[ModelAlias, ModelConfig] = {
@@ -95,6 +99,25 @@ MODEL_REGISTRY: dict[ModelAlias, ModelConfig] = {
         api_key_env="SENSENOVA_API_KEY",
         credential_group="sensenova",
         image_generation=True,
+        cost_per_1m_input=0.0,
+        cost_per_1m_output=0.0,
+    ),
+    "cohere-command-a-plus": ModelConfig(
+        alias="cohere-command-a-plus",
+        provider="openai",
+        model_id="command-a-plus-05-2026",
+        api_key_env="COHERE_API_KEY",
+        credential_group="cohere",
+        multimodal=True,
+        cost_per_1m_input=0.0,
+        cost_per_1m_output=0.0,
+    ),
+    "cf-glm-5.2": ModelConfig(
+        alias="cf-glm-5.2",
+        provider="openai",
+        model_id="@cf/zai-org/glm-5.2",
+        api_key_env="CLOUDFLARE_API_KEY",
+        credential_group="cloudflare",
         cost_per_1m_input=0.0,
         cost_per_1m_output=0.0,
     ),

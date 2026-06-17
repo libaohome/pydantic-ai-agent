@@ -1,12 +1,6 @@
 """应用配置中心 — 从环境变量与 .env 文件加载所有运行时参数。
 
-本模块位于 ``app/core/`` 包内，是项目的**配置单一来源（Single Source of Truth）**。
-
-职责概览：
-    - 定义 ``AppSettings`` 配置类（基于 Pydantic Settings）
-    - 计算项目路径（``BASE_DIR``、``DATA_DIR`` 等）
-    - 提供 ``get_settings()`` 缓存单例，避免重复解析
-    - 启动时将 API Key 同步到 ``os.environ``，供 pydantic-ai 底层读取
+所有配置项必须在 ``.env`` 或环境变量中显式提供，代码内不设业务默认值。
 """
 
 # from __future__ import annotations
@@ -33,6 +27,8 @@ _API_KEY_FIELDS = (
     ("LONGCAT_API_KEY", "longcat_api_key"),
     ("AGNESAI_API_KEY", "agnesai_api_key"),
     ("SENSENOVA_API_KEY", "sensenova_api_key"),
+    ("COHERE_API_KEY", "cohere_api_key"),
+    ("CLOUDFLARE_API_KEY", "cloudflare_api_key"),
 )
 
 
@@ -45,32 +41,32 @@ class AppSettings(BaseSettings):
         extra="ignore",
     )
 
-    app_env: str = "development"
-    app_secret_key: str = "change-me-in-production"
-    default_model: str = "deepseek:deepseek-chat"
+    app_env: str
+    app_secret_key: str
+    default_model: str
 
-    deepseek_api_key: str = ""
-    longcat_api_key: str = ""
-    longcat_base_url: str = "https://api.longcat.chat/openai"
-    agnesai_api_key: str = ""
-    agnesai_base_url: str = "https://apihub.agnes-ai.com/v1"
-    sensenova_api_key: str = ""
-    sensenova_base_url: str = "https://token.sensenova.cn/v1"
+    deepseek_api_key: str
+    longcat_api_key: str
+    longcat_base_url: str
+    agnesai_api_key: str
+    agnesai_base_url: str
+    sensenova_api_key: str
+    sensenova_base_url: str
+    cohere_api_key: str
+    cohere_base_url: str
+    cloudflare_api_key: str
+    cloudflare_base_url: str
 
-    logfire_token: str = ""
-    database_url: str = f"sqlite+aiosqlite:///{DATA_DIR / 'agent.db'}"
-    mcp_fetch_url: str = ""
+    logfire_token: str
+    database_url: str
+    mcp_fetch_url: str
 
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"
-
-
 @lru_cache
 def get_settings() -> AppSettings:
     return AppSettings()
-
-
 def bootstrap_env() -> None:
     """启动引导：加载 .env 并将 API Key 同步到 ``os.environ``。"""
     load_dotenv(ENV_FILE)
