@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Literal
+from pydantic_ai.models.openai import OpenAIChatModel
 
 from app.core.config import get_settings
 
@@ -140,7 +141,7 @@ class LlmManager:
         suffix = f"@{base_url}" if base_url else ""
         return f"openai:{cfg.model_id}{suffix}"
 
-    def resolve_model(self, alias: ModelAlias | None = None) -> str | Any:
+    def resolve_model(self, alias: ModelAlias | None = None) -> str | OpenAIChatModel:
         """将模型别名解析为 pydantic-ai Agent 可接受的 model 对象或字符串。"""
         cfg = MODEL_REGISTRY[alias or self._default_alias()]
         if cfg.provider == "deepseek":

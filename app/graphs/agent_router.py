@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal,Any
 
 import logfire
 from pydantic_graph import BaseNode, End, Graph, GraphRunContext
@@ -78,7 +78,7 @@ async def _run_node_agent(state: WorkflowState, agent_name: AgentName, field_nam
 
 @dataclass
 class RouterNode(BaseNode[WorkflowState]):
-    async def run(self, ctx: GraphRunContext[WorkflowState]) -> AnalyzeNode | ReviewNode | QaNode | End[WorkflowState]:
+    async def run(self, ctx: GraphRunContext[WorkflowState]) -> BaseNode[WorkflowState, None, Any] | End[Any]:
         with logfire.span("router_node", input=ctx.state.user_input[:100]):
             route = classify_route(ctx.state.user_input)
 
@@ -97,7 +97,7 @@ class RouterNode(BaseNode[WorkflowState]):
 
 @dataclass
 class AnalyzeNode(BaseNode[WorkflowState]):
-    async def run(self, ctx: GraphRunContext[WorkflowState]) -> End[WorkflowState]:
+    async def run(self, ctx: GraphRunContext[WorkflowState]) -> BaseNode[WorkflowState, None, Any] | End[Any]:
         with logfire.span("analyze_node"):
             try:
                 await _run_node_agent(ctx.state, AgentName.data_analyst, "analysis_result")
@@ -108,7 +108,7 @@ class AnalyzeNode(BaseNode[WorkflowState]):
 
 @dataclass
 class ReviewNode(BaseNode[WorkflowState]):
-    async def run(self, ctx: GraphRunContext[WorkflowState]) -> End[WorkflowState]:
+    async def run(self, ctx: GraphRunContext[WorkflowState]) -> BaseNode[WorkflowState, None, Any] | End[Any]:
         with logfire.span("review_node"):
             try:
                 await _run_node_agent(ctx.state, AgentName.code_reviewer, "review_result")
@@ -119,7 +119,8 @@ class ReviewNode(BaseNode[WorkflowState]):
 
 @dataclass
 class QaNode(BaseNode[WorkflowState]):
-    async def run(self, ctx: GraphRunContext[WorkflowState]) -> End[WorkflowState]:
+    # async def run(self, ctx: GraphRunContext[WorkflowState]) -> End[WorkflowState]:
+    async def run(self, ctx: GraphRunContext[WorkflowState]) -> BaseNode[WorkflowState, None, Any] | End[Any]:
         with logfire.span("qa_node"):
             try:
                 await _run_node_agent(ctx.state, AgentName.qa_assistant, "qa_result")

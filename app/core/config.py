@@ -66,17 +66,19 @@ class AppSettings(BaseSettings):
         return self.app_env == "production"
 @lru_cache
 def get_settings() -> AppSettings:
-    return AppSettings()
+    return AppSettings() # type: ignore[call-arg]
+
+
 def bootstrap_env() -> None:
     """启动引导：加载 .env 并将 API Key 同步到 ``os.environ``。"""
     load_dotenv(ENV_FILE)
-    settings = AppSettings()
+    settings = AppSettings() # type: ignore
+
     for env_var, field_name in _API_KEY_FIELDS:
         if env_var in os.environ:
             continue
         value = getattr(settings, field_name, None)
         if value:
             os.environ[env_var] = value
-
 
 bootstrap_env()

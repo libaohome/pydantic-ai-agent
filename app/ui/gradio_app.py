@@ -64,6 +64,8 @@ MODEL_CHOICES: list[str] = list(MODEL_REGISTRY.keys())
 # 反向映射：界面标签 → agent value
 AGENT_LABELS = {label: value for label, value in AGENT_CHOICES}
 
+GradioUpdate = dict[str, Any]
+
 
 def _workflow_choices() -> list[tuple[str, str]]:
     """下拉框显示名 → 内部 workflow 标识。"""
@@ -352,7 +354,7 @@ def _skill_names() -> list[str]:
         return []
 
 
-def _skill_dropdown_update() -> gr.Dropdown:
+def _skill_dropdown_update() -> GradioUpdate:
     """生成 Gradio Dropdown 的 update 对象，刷新选项列表。"""
     return gr.update(choices=_skill_names(), value=None)
 

@@ -196,7 +196,7 @@ def build_analysis_pixels(pil_image):
     if max(w, h) > MAX_ANALYSIS_EDGE:
         scale = MAX_ANALYSIS_EDGE / max(w, h)
         nw, nh = max(1, int(round(w * scale))), max(1, int(round(h * scale)))
-        pil_image = pil_image.resize((nw, nh), Image.BILINEAR)
+        pil_image = pil_image.resize((nw, nh), Image.Resampling.BILINEAR)
 
     if pil_image.mode != "RGB":
         pil_image = pil_image.convert("RGB")

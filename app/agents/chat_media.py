@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 import mimetypes
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 
 import httpx
 from pydantic_ai.messages import BinaryContent, FilePart, ModelMessage, UserContent
@@ -103,12 +103,14 @@ def build_chat_user_prompt(
 
     if not parts:
         return "请处理以上附件。"
-    if all(isinstance(p, str) for p in parts):
+    if _all_str_parts(parts):
         return "\n\n".join(parts)
     if len(parts) == 1 and isinstance(parts[0], str):
         return parts[0]
     return parts
 
+def _all_str_parts(parts: list[UserContent]) -> TypeGuard[list[str]]:
+    return all(isinstance(p, str) for p in parts)
 
 async def run_sensenova_image_generation(
     prompt: str,

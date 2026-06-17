@@ -28,7 +28,7 @@ from pathlib import Path
 
 # SQLAlchemy 异步扩展：``AsyncSession`` 是异步会话；``create_async_engine`` 创建异步引擎
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
-
+from collections.abc import AsyncGenerator
 from app.core.config import get_settings, DATA_DIR
 
 
@@ -90,7 +90,7 @@ async def init_db() -> None:
         await conn.run_sync(Base.metadata.create_all)
 
 
-async def get_session() -> AsyncSession:
+async def get_session() -> AsyncGenerator[AsyncSession, None]:
     """异步生成器：为每个请求提供一个数据库会话（FastAPI 依赖注入用法）。
 
     函数体内有 ``yield``，使其成为**异步生成器**。FastAPI 的 ``Depends(get_session)``

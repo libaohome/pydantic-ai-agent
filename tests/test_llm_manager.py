@@ -1,5 +1,7 @@
 """单元测试 — LLM 管理器（LlmManager）。"""
 
+from pydantic_ai.models.openai import OpenAIChatModel
+
 from app.core.llm import LlmManager, MODEL_REGISTRY
 
 
@@ -21,6 +23,7 @@ class TestLlmManager:
     def test_resolve_openai_compat_model(self):
         llm = LlmManager()
         model = llm.resolve_model("agnes-2.0-flash")
+        assert isinstance(model, OpenAIChatModel)
         assert model.model_name == "agnes-2.0-flash"
 
     def test_resolve_cohere_model(self):
@@ -29,6 +32,7 @@ class TestLlmManager:
         assert s.startswith("openai:command-a-plus-05-2026@")
         assert "cohere.ai" in s
         model = llm.resolve_model("cohere-command-a-plus")
+        assert isinstance(model, OpenAIChatModel)
         assert model.model_name == "command-a-plus-05-2026"
 
     def test_resolve_cloudflare_model(self):
@@ -37,6 +41,7 @@ class TestLlmManager:
         assert s.startswith("openai:@cf/zai-org/glm-5.2@")
         assert "cloudflare.com" in s
         model = llm.resolve_model("cf-glm-5.2")
+        assert isinstance(model, OpenAIChatModel)
         assert model.model_name == "@cf/zai-org/glm-5.2"
 
     def test_track_cost(self):
