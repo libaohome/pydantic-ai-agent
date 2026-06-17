@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import time
 from pathlib import Path
 from typing import Any
@@ -425,16 +424,16 @@ def _models_to_dataframe() -> list[list[str]]:
     llm = get_llm_manager()
     rows: list[list[str]] = []
     for alias, cfg in MODEL_REGISTRY.items():
-        key_ok = "✅" if (not cfg.api_key_env or os.environ.get(cfg.api_key_env)) else "❌"
         rows.append([
             alias,
             cfg.provider,
             cfg.model_id,
             llm._get_base_url(cfg.credential_group) if cfg.credential_group else "-",
             "是" if cfg.reasoning else "否",
+            "是" if cfg.multimodal else "否",
+            "是" if cfg.image_generation else "否",
             f"${cfg.cost_per_1m_input:.2f}",
             f"${cfg.cost_per_1m_output:.2f}",
-            key_ok,
         ])
     return rows
 
@@ -445,6 +444,7 @@ def refresh_models() -> tuple[list[list[str]], str, str]:
 
     在 Tab 加载和点击「刷新」时调用。
     """
+    get_settings.cache_clear()
     llm = get_llm_manager()
     settings = get_settings()
     costs = llm.get_cost_report()
@@ -855,7 +855,7 @@ def create_gradio_demo() -> gr.Blocks:
                 gr.Markdown("### 模型注册表")
                 model_headers = [
                     "别名", "Provider", "Model ID", "Base URL",
-                    "推理", "输入$/1M", "输出$/1M", "API Key",
+                    "推理", "多模态", "文生图", "输入$/1M", "输出$/1M",
                 ]
                 model_table = gr.Dataframe(
                     headers=model_headers,
