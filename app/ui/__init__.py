@@ -11,6 +11,8 @@ Gradio Web UI 子包（app.ui）。
         mount_gradio_ui(app, path="/ui")
 """
 
+from __future__ import annotations
+
 from app.ui.gradio_app import create_gradio_demo, mount_gradio_ui
 
 __all__ = ["create_gradio_demo", "mount_gradio_ui"]

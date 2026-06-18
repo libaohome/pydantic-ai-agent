@@ -29,6 +29,26 @@ from pydantic_ai import RunContext
 from app.core.deps import AgentDeps
 
 
+def _sandbox_root(ctx: RunContext[AgentDeps] | None) -> Path | None:
+    """从 runtime_config 解析沙箱根目录；未配置时返回 None。"""
+    if ctx is None:
+        return None
+    root = ctx.deps.runtime_config.get("sandbox_root")
+    if not root:
+        return None
+    return Path(root).resolve()
+
+
+def _sandbox_denied(path: Path, sandbox: Path) -> str | None:
+    """若 path 不在 sandbox 内，返回错误信息；否则返回 None。"""
+    try:
+        if not path.resolve().is_relative_to(sandbox):
+            return f"Error: access denied — {path} is outside sandbox"
+    except OSError as e:
+        return f"Error: invalid path — {e}"
+    return None
+
+
 # ─── 文件操作工具 ──────────────────────────────
 
 async def read_file(path: str, *, ctx: RunContext[AgentDeps] | None = None) -> str:
@@ -37,7 +57,7 @@ async def read_file(path: str, *, ctx: RunContext[AgentDeps] | None = None) -> s
 
     参数:
             path: 文件路径（相对或绝对路径均可）
-            ctx: 可选的运行上下文；若提供且配置了 sandbox_root，则禁止读取沙箱外文件
+            ctx: 可选的运行上下文；若 runtime_config 含 sandbox_root，则禁止读取沙箱外文件
 
     返回:
             文件文本内容；若出错则返回以 "Error:" 开头的错误信息字符串
@@ -50,11 +70,11 @@ async def read_file(path: str, *, ctx: RunContext[AgentDeps] | None = None) -> s
         return f"Error: '{path}' is a directory, not a file. Use list_directory instead."
     if not p.is_file():
         return f"Error: '{path}' is not a readable file."
-    # 安全检查：若配置了沙箱根目录，则 resolve() 后必须在沙箱内
-    if ctx and ctx.deps.metadata.get("sandbox_root"):
-        sandbox = Path(ctx.deps.metadata["sandbox_root"])
-        if not p.resolve().is_relative_to(sandbox.resolve()):
-            return f"Error: access denied — {path} is outside sandbox"
+    sandbox = _sandbox_root(ctx)
+    if sandbox is not None:
+        denied = _sandbox_denied(p, sandbox)
+        if denied:
+            return denied
     try:
         return p.read_text(encoding="utf-8")
     except OSError as e:
@@ -66,17 +86,20 @@ async def write_file(path: str, content: str, *, ctx: RunContext[AgentDeps] | No
     将文本内容写入指定文件。
 
     若父目录不存在会自动创建（mkdir parents=True）。
-    注意：当前实现未做沙箱校验，生产环境建议与 read_file 一样增加路径限制。
-
     参数:
             path: 目标文件路径
             content: 要写入的字符串内容
-            ctx: 预留的运行上下文（暂未使用）
+            ctx: 可选的运行上下文；若 runtime_config 含 sandbox_root，则禁止写入沙箱外路径
 
     返回:
             成功时返回写入字符数的确认信息
     """
     p = Path(path)
+    sandbox = _sandbox_root(ctx)
+    if sandbox is not None:
+        denied = _sandbox_denied(p, sandbox)
+        if denied:
+            return denied
     p.parent.mkdir(parents=True, exist_ok=True)  # 确保父目录存在
     p.write_text(content, encoding="utf-8")
     return f"Successfully wrote {len(content)} chars to {path}"
@@ -134,7 +157,7 @@ async def run_shell(command: str, timeout: int = 30, *, ctx: RunContext[AgentDep
     参数:
             command: 完整 shell 命令字符串
             timeout: 超时秒数
-            ctx: 预留上下文（可扩展为限制工作目录等）
+            ctx: 可选的运行上下文；若 runtime_config 含 sandbox_root，命令在沙箱目录下执行
 
     返回:
             标准输出；非零退出码时会附加 STDERR 和退出码信息
@@ -153,6 +176,13 @@ async def run_shell(command: str, timeout: int = 30, *, ctx: RunContext[AgentDep
             f"Allowed: {', '.join(sorted(ALLOWED_COMMANDS))}"
         )
 
+    run_cwd: str | None = None
+    sandbox = _sandbox_root(ctx)
+    if sandbox is not None:
+        if not sandbox.is_dir():
+            return f"Error: sandbox_root does not exist: {sandbox}"
+        run_cwd = str(sandbox)
+
     try:
         result = subprocess.run(
             command,
@@ -160,6 +190,7 @@ async def run_shell(command: str, timeout: int = 30, *, ctx: RunContext[AgentDep
             capture_output=True,  # 捕获 stdout/stderr
             text=True,            # 以文本而非字节返回
             timeout=timeout,
+            cwd=run_cwd,
         )
     except subprocess.TimeoutExpired:
         return f"Error: command timed out after {timeout}s"

@@ -19,9 +19,13 @@ import logfire  # 可观测性库，用于记录 span（追踪片段），便于
 
 from pydantic_ai import Agent, RunContext
 
+from typing import Any
+
 from app.core.deps import AgentDeps
-from app.core.llm import get_llm_manager  # 单例 LLM 管理器，负责解析模型别名
 from app.models.schemas import CodeReviewOutput  # Pydantic 模型，定义审查报告的结构
+
+# 使用 runner 默认行为：standard prompt、结构化 output 序列化、无 DB 会话
+RUNTIME_CONFIG: dict[str, Any] = {}
 
 # 当用户没有提供具体代码时，追加这段系统提示，引导模型直接作答而非盲目调用工具
 _NO_CODE_HINT = (
@@ -70,7 +74,7 @@ def prepare_review_input(user_input: str, file_ids: list[str] | None = None) -> 
 #   - output_type=CodeReviewOutput：模型输出会被解析为 Pydantic 对象
 
 code_review_agent = Agent[AgentDeps, CodeReviewOutput](
-    model=get_llm_manager().resolve_model_string("deepseek-chat"),  # 默认使用 deepseek-chat 模型
+    model="deepseek:deepseek-chat",  # 运行时 runner 可按 model_alias 覆盖
     output_type=CodeReviewOutput,
     deps_type=AgentDeps,
     instructions="""你是一名资深代码审查工程师。你的任务：

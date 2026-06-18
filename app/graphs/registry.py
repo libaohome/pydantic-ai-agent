@@ -1,5 +1,7 @@
 """Workflow 注册表 — 统一管理所有工作流图实例。"""
 
+from __future__ import annotations
+
 from enum import Enum
 
 from pydantic_graph import Graph

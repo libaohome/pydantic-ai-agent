@@ -1,11 +1,15 @@
 """单元测试 — ChatModelAgent 多模态输入构建。"""
 
+from __future__ import annotations
+
 from app.agents.chat_media import (
     build_chat_user_prompt,
     get_chat_builtin_tools,
+    resolve_agent_for_model_alias,
     supports_image_generation,
     supports_multimodal_input,
 )
+from app.agents.registry import AgentName
 from pydantic_ai.messages import BinaryContent
 
 
@@ -22,6 +26,12 @@ def test_sensenova_multimodal_and_image_flags():
     assert supports_multimodal_input("sensenova-6.7-flash-lite")
     assert supports_image_generation("sensenova-u1-fast")
     assert not supports_image_generation("deepseek-chat")
+
+
+def test_resolve_agent_for_model_alias():
+    assert resolve_agent_for_model_alias("sensenova-u1-fast") == AgentName.image_gen
+    assert resolve_agent_for_model_alias("deepseek-chat") == AgentName.chat_model
+    assert resolve_agent_for_model_alias(None) == AgentName.chat_model
 
 
 def test_build_chat_user_prompt_with_text_file(tmp_path, monkeypatch):

@@ -23,3 +23,5 @@
     from app.models.schemas import CodeReviewInput
     from app.models.schema import Conversation, Base
 """
+from __future__ import annotations
+

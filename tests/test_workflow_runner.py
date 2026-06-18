@@ -1,5 +1,7 @@
 """单元测试 — Workflow 运行器。"""
 
+from __future__ import annotations
+
 import pytest
 
 from app.graphs import WorkflowName, run_workflow

@@ -1,5 +1,7 @@
 """单元测试 — 用户上传文件存储。"""
 
+from __future__ import annotations
+
 import pytest
 
 from app.core.uploads import UploadStore
@@ -31,6 +33,13 @@ class TestUploadStore:
       assert meta.file_id == file_id
       assert meta.original_name == "data.csv"
       assert meta.size > 0
+      assert meta.mime_type == "text/csv"
+
+  def test_save_from_bytes_stores_mime_type(self, upload_store):
+      file_id = upload_store.save_from_bytes(b"\x89PNG\r\n", "shot.png", mime_type="image/png")
+      meta = upload_store.get_metadata(file_id)
+      assert meta.mime_type == "image/png"
+      assert file_id.endswith(".png")
 
   def test_read_text(self, upload_store, tmp_path):
       source = tmp_path / "note.txt"
@@ -44,6 +53,16 @@ class TestUploadStore:
           upload_store.get_path("../escape.txt")
 
   def test_save_bytes(self, upload_store):
-      file_id = upload_store.save_bytes(b"binary", "blob.bin")
+      file_id = upload_store.save_from_bytes(b"binary", "blob.bin")
+      meta = upload_store.get_metadata(file_id)
+      assert meta.mime_type == "application/octet-stream"
       assert upload_store.exists(file_id)
       assert upload_store.get_path(file_id).read_bytes() == b"binary"
+
+
+def test_guess_image_extension_from_magic_bytes():
+    from app.core.uploads import guess_image_extension
+
+    png = b"\x89PNG\r\n\x1a\n" + b"rest"
+    assert guess_image_extension("application/octet-stream", png) == ".png"
+    assert guess_image_extension("image/png", png) == ".png"

@@ -34,6 +34,7 @@ async def run_workflow(workflow_name: WorkflowName, request: WorkflowRunRequest)
             user_id=request.user_id,
             session_id=request.session_id,
             file_ids=request.file_ids,
+            runtime_config=request.runtime_config,
         )
 
         try:

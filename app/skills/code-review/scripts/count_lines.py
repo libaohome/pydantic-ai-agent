@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 #!/usr/bin/env python3
 """
 代码行数统计脚本 — 供 code-review Skill 通过 run_skill_script 调用。

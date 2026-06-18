@@ -7,6 +7,8 @@
 `__all__` 列表定义了「公开 API」—— 只有列在其中的名字会被 `from app.tools import *` 导入。
 """
 
+from __future__ import annotations
+
 from app.tools.file_tools import (
     read_file,
     write_file,

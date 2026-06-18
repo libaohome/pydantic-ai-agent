@@ -13,6 +13,8 @@ Fixtures 说明：
 - ``no_skill_md_zip``：缺少 SKILL.md 的无效包
 """
 
+from __future__ import annotations
+
 import io
 import json
 import zipfile

@@ -17,6 +17,8 @@
 面向小白：本脚本用 subprocess 调用 shell 命令，check=True 表示命令失败会抛异常。
 """
 
+from __future__ import annotations
+
 import os
 import subprocess
 import sys

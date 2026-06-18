@@ -22,16 +22,14 @@ from __future__ import annotations
 
 # ``TYPE_CHECKING`` 为 False 时不执行块内 import，仅用于类型注解，避免运行时循环导入
 from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from fastapi import FastAPI
 
 import logfire
 from app.core.config import get_settings
 
-if TYPE_CHECKING:
-    from fastapi import FastAPI
-
 # ``frozenset`` 是不可变集合，查找 O(1)，适合存放占位符 token 黑名单
 _PLACEHOLDER_TOKENS = frozenset({"", "xxx", "your-token-here", "change-me"})
-
 
 def _is_logfire_enabled(token: str) -> bool:
     """判断 Logfire token 是否为有效配置（非空且非占位符）。
@@ -43,7 +41,6 @@ def _is_logfire_enabled(token: str) -> bool:
         bool: token 有效时为 True，应启用云端 Logfire。
     """
     return token.strip().lower() not in _PLACEHOLDER_TOKENS
-
 
 def setup_observability(app: FastAPI) -> None:
     """初始化 Logfire 可观测性（应用启动时调用一次）。
@@ -64,11 +61,12 @@ def setup_observability(app: FastAPI) -> None:
         logfire.configure(
             token=settings.logfire_token,
             environment=settings.app_env,
-            service_name="pydantic-ai-agent",
+            service_name=settings.app_name,
         )
         # instrument_* 系列：猴子补丁式注入追踪，自动记录请求/调用链
         logfire.instrument_fastapi(app)
         logfire.instrument_httpx()
+        logfire.instrument_sqlalchemy()
         logfire.instrument_pydantic_ai()
 
         print("[Observability] Logfire enabled")

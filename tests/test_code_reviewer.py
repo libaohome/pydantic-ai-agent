@@ -11,6 +11,8 @@
 - Pydantic 模型：用类型注解做数据校验；``model_json_schema()`` 可导出 JSON Schema
 """
 
+from __future__ import annotations
+
 import pytest
 from unittest.mock import AsyncMock, patch
 

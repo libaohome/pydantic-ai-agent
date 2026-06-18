@@ -23,3 +23,5 @@
 安装或开发模式下，需将项目根目录加入 ``PYTHONPATH``，才能 ``import app``。
 通常由 ``uv run``、``pip install -e .`` 或 IDE 自动配置完成。
 """
+from __future__ import annotations
+

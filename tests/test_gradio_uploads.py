@@ -1,5 +1,7 @@
 """单元测试 — Gradio 多模态上传解析。"""
 
+from __future__ import annotations
+
 from app.ui.gradio_app import _resolve_gradio_file_ref, _save_multimodal_uploads
 
 

@@ -1,5 +1,7 @@
 """单元测试 — Agent 输入附件处理。"""
 
+from __future__ import annotations
+
 from app.agents.input_files import (
     enrich_user_input_with_files,
     format_file_ids_hint,

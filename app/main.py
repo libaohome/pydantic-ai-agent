@@ -66,6 +66,9 @@ async def lifespan(app: FastAPI):
     await init_db()
     print("[Startup] Database initialized")
 
+    from app.core.llm_manager import get_llm_manager
+    print(f"[Startup] LLM models loaded: {len(get_llm_manager().list_aliases())} model(s)")
+
     # 初始化 Skill 包管理器，并注入到 skills 路由模块的全局变量中
     skill_manager = SkillPackageManager()
     set_skill_manager(skill_manager)

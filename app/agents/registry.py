@@ -10,16 +10,25 @@
 - **注册表模式**：新增 Agent 时只需在此文件导入并加入 ``AGENTS`` 字典即可。
 """
 
+from __future__ import annotations
+
 from enum import Enum  # Enum：枚举基类，用于定义一组命名常量
 from typing import Any  # Any：表示「任意类型」，常用于输出类型不确定的场景
 
 from pydantic_ai import Agent  # pydantic-ai 的核心 Agent 类
 
 from app.core.deps import AgentDeps  # 自定义依赖注入容器（租户、用户、请求 ID 等）
-from app.agents.code_reviewer import code_review_agent
-from app.agents.data_analyst import data_analysis_agent
-from app.agents.qa_assistant import qa_agent
-from app.agents.chat_model import chat_model_agent
+from app.agents.code_reviewer import RUNTIME_CONFIG as code_reviewer_runtime, code_review_agent
+from app.agents.data_analyst import RUNTIME_CONFIG as data_analyst_runtime, data_analysis_agent
+from app.agents.qa_assistant import RUNTIME_CONFIG as qa_assistant_runtime, qa_assistant_agent
+from app.agents.chat_model import (
+    RUNTIME_CONFIG as chat_model_runtime,
+    chat_model_agent,
+)
+from app.agents.image_gen import (
+    RUNTIME_CONFIG as image_gen_runtime,
+    image_gen_agent,
+)
 
 
 class AgentName(str, Enum):
@@ -34,7 +43,8 @@ class AgentName(str, Enum):
     code_reviewer = "code-reviewer"   # 代码审查 Agent
     data_analyst = "data-analyst"     # 数据分析 Agent
     qa_assistant = "qa-assistant"     # 知识问答 Agent
-    chat_model = "chat-model"         # 通用对话（模型原生能力）
+    chat_model = "chat-model"         # 通用对话（文本 / 多模态理解）
+    image_gen = "image-gen"           # 文生图
 
 
 # ─── Agent 注册表 ─────────────────────────────────
@@ -46,10 +56,24 @@ class AgentName(str, Enum):
 AGENTS: dict[AgentName, Agent[AgentDeps, Any]] = {
     AgentName.code_reviewer: code_review_agent,
     AgentName.data_analyst: data_analysis_agent,
-    AgentName.qa_assistant: qa_agent,
+    AgentName.qa_assistant: qa_assistant_agent,
     AgentName.chat_model: chat_model_agent,
+    AgentName.image_gen: image_gen_agent,
 }
 
+AGENT_RUNTIME_CONFIGS: dict[AgentName, dict[str, Any]] = {
+    AgentName.code_reviewer: code_reviewer_runtime,
+    AgentName.data_analyst: data_analyst_runtime,
+    AgentName.qa_assistant: qa_assistant_runtime,
+    AgentName.chat_model: chat_model_runtime,
+    AgentName.image_gen: image_gen_runtime,
+}
+
+
+def build_runtime_config(agent_name: AgentName, user_config: dict[str, Any]) -> dict[str, Any]:
+    """合并 Agent 模块声明的 RUNTIME_CONFIG 与外层请求传入的配置（后者可覆盖）。"""
+    defaults = AGENT_RUNTIME_CONFIGS.get(agent_name, {})
+    return {**defaults, **user_config}
 
 def get_agent(name: AgentName) -> Agent[AgentDeps, Any]:
     """根据名称获取 Agent 实例。
@@ -65,7 +89,6 @@ def get_agent(name: AgentName) -> Agent[AgentDeps, Any]:
         KeyError: 当枚举值在 ``AGENTS`` 字典中不存在时抛出。
     """
     return AGENTS[name]
-
 
 def list_agents() -> list[dict[str, str]]:
     """列出所有可用 Agent 的元信息。

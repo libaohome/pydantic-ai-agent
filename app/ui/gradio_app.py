@@ -30,10 +30,11 @@ from fastapi import FastAPI
 
 from app.agents.registry import AgentName, list_agents
 from app.agents import run_agent
+from app.agents.runner import resolve_agent_name_for_model
 from app.graphs import WorkflowName, list_workflows, run_workflow
 from app.agents.chat_media import format_chat_model_output_markdown
 from app.core.config import get_settings
-from app.core.llm import MODEL_REGISTRY, get_llm_manager
+from app.core.llm_manager import get_llm_manager
 from app.core.uploads import get_upload_store
 from app.models.schemas import AgentRunRequest, AgentRunResult, WorkflowRunRequest, WorkflowRunResult
 from app.skills.routes import get_skill_manager
@@ -53,13 +54,38 @@ EMPTY_MULTIMODAL_INPUT: dict[str, str | list] = {"text": "", "files": []}
 
 # 下拉框显示名 → 内部 agent 标识（不含 workflow）
 AGENT_CHOICES: list[tuple[str, str]] = [
+    ("通用对话 (chat-model)", "chat-model"),
+    ("文生图 (image-gen)", "image-gen"),
     ("知识问答 (qa-assistant)", "qa-assistant"),
     ("代码审查 (code-reviewer)", "code-reviewer"),
     ("数据分析 (data-analyst)", "data-analyst"),
 ]
 
-# 模型别名列表，来自 LLM 注册表
-MODEL_CHOICES: list[str] = list(MODEL_REGISTRY.keys())
+def _all_model_choices() -> list[str]:
+    """全部已注册模型别名。"""
+    aliases = get_llm_manager().list_aliases()
+    return aliases if aliases else ["deepseek-chat"]
+
+
+def _models_for_agent(agent_value: str) -> list[str]:
+    """按 Agent 类型过滤可用模型。"""
+    llm = get_llm_manager()
+    aliases = _all_model_choices()
+    if agent_value == "image-gen":
+        image_aliases = [a for a in aliases if llm.has_alias(a) and llm.get_config(a).image_generation]
+        return image_aliases or aliases
+    return [a for a in aliases if not llm.has_alias(a) or not llm.get_config(a).image_generation] or aliases
+
+
+def _pick_model_value(choices: list[str], current: str | None) -> str | None:
+    if current in choices:
+        return current
+    return choices[0] if choices else None
+
+
+def _model_choices() -> list[str]:
+    """模型别名列表（兼容旧调用）。"""
+    return _all_model_choices()
 
 # 反向映射：界面标签 → agent value
 AGENT_LABELS = {label: value for label, value in AGENT_CHOICES}
@@ -92,7 +118,7 @@ def _format_agent_output(output: Any, agent: str) -> str:
     if not isinstance(output, dict):
         return str(output)
 
-    if agent == "chat-model":
+    if agent in ("chat-model", "image-gen"):
         return format_chat_model_output_markdown(output)
 
     if agent == "qa-assistant":
@@ -422,15 +448,22 @@ def refresh_skills() -> tuple[str, gr.Dropdown]:
 # ─── Model 管理 ──────────────────────────────────
 
 def _models_to_dataframe() -> list[list[str]]:
-    """将 MODEL_REGISTRY 转为 Gradio Dataframe 所需的二维列表。"""
+    """将模型注册表转为 Gradio Dataframe 所需的二维列表。"""
     llm = get_llm_manager()
     rows: list[list[str]] = []
-    for alias, cfg in MODEL_REGISTRY.items():
+    for alias, cfg in llm.registry.items():
+        group_name = llm.get_credential_group_name(cfg.credential_group or "")
         rows.append([
             alias,
+            cfg.model_name,
             cfg.provider,
             cfg.model_id,
-            llm._get_base_url(cfg.credential_group) if cfg.credential_group else "-",
+            group_name,
+            (
+                llm.get_credentials(cfg.credential_group)[1] or "-"
+                if cfg.credential_group
+                else "-"
+            ),
             "是" if cfg.reasoning else "否",
             "是" if cfg.multimodal else "否",
             "是" if cfg.image_generation else "否",
@@ -486,6 +519,8 @@ async def run_agent_test(
     context: str,
     query: str,
     data_source: str,
+    chat_input: str,
+    image_prompt: str,
     history: ChatHistory,
 ) -> ChatHistory:
     """
@@ -503,6 +538,7 @@ async def run_agent_test(
         context=context,
         query=query,
         data_source=data_source,
+        chat_input=chat_input if agent_value == "chat-model" else image_prompt,
     )
     if err:
         return _append_chat_turn(
@@ -532,14 +568,44 @@ async def run_agent_test(
     return _append_chat_turn(history, user_message, f"{formatted}{_format_run_meta(result)}")
 
 
-def switch_agent_input_form(agent_label: str) -> tuple[gr.update, gr.update, gr.update]:
-    """切换 Agent 输入区各字段分组的可见性（Chat / Agent 测试共用）。"""
+def switch_agent_input_form(
+    agent_label: str,
+) -> tuple[gr.update, gr.update, gr.update, gr.update, gr.update, gr.update]:
+    """切换 Agent 输入区可见性，并按 Agent 过滤模型下拉。"""
     agent_value = AGENT_LABELS.get(agent_label, "qa-assistant")
-    show_qa, show_review, show_analyst = agent_form_visibility(agent_value)
+    show_qa, show_review, show_analyst, show_chat_model, show_image_gen = agent_form_visibility(
+        agent_value
+    )
+    model_choices = _models_for_agent(agent_value)
+    # 切换 Agent 时重置为兼容列表首项，避免旧模型值不在新 choices 内触发 Gradio 校验错误
+    model_value = model_choices[0] if model_choices else None
     return (
         gr.update(visible=show_qa),
         gr.update(visible=show_review),
         gr.update(visible=show_analyst),
+        gr.update(visible=show_chat_model),
+        gr.update(visible=show_image_gen),
+        gr.update(choices=model_choices, value=model_value),
+    )
+
+
+def refresh_ui_model_dropdowns(
+    agent_label: str,
+    chat_model_value: str | None,
+) -> tuple[gr.update, gr.update]:
+    """页面加载时刷新 Chat / Agent 测试的模型下拉列表。"""
+    chat_choices = _all_model_choices()
+    agent_value = AGENT_LABELS.get(agent_label, AGENT_CHOICES[0][1])
+    test_choices = _models_for_agent(agent_value)
+    return (
+        gr.update(
+            choices=chat_choices,
+            value=_pick_model_value(chat_choices, chat_model_value),
+        ),
+        gr.update(
+            choices=test_choices,
+            value=test_choices[0] if test_choices else None,
+        ),
     )
 
 
@@ -615,7 +681,7 @@ async def chat_submit(
 
     reply = await _run_chat_agent(
         text,
-        AgentName.chat_model.value,
+        resolve_agent_name_for_model(model_alias).value,
         model_alias,
         file_ids=file_ids,
         session_id=session_name,
@@ -663,13 +729,14 @@ def create_gradio_demo() -> gr.Blocks:
             # ── Chat Tab：多轮对话（qa-assistant + 模型切换）──
             with gr.Tab("💬 Chat"):
                 gr.Markdown(
-                    "与 **chat-model** 对话：纯模型原生能力（文本 / 多模态理解 / 生图），"
-                    "不调用 Skill 或知识库。测试业务 Agent 请使用 **Agent** 标签页。"
+                    "与 **chat-model** / **image-gen** 对话：按所选模型自动路由。"
+                    "**chat-model** 负责文本与多模态理解；**image-gen** 负责文生图（如 sensenova-u1-fast）。"
+                    "测试业务 Agent 请使用 **Agent** 标签页。"
                 )
                 with gr.Row():
                     chat_model = gr.Dropdown(
-                        choices=MODEL_CHOICES,
-                        value=MODEL_CHOICES[0],
+                        choices=_model_choices(),
+                        value=_model_choices()[0],
                         label="模型",
                         allow_custom_value=False,
                     )
@@ -735,12 +802,29 @@ def create_gradio_demo() -> gr.Blocks:
                         label="选择 Agent",
                     )
                     test_model = gr.Dropdown(
-                        choices=MODEL_CHOICES,
-                        value=MODEL_CHOICES[0],
+                        choices=_model_choices(),
+                        value=_model_choices()[0],
                         label="模型",
+                        allow_custom_value=True,
                     )
 
-                with gr.Group(visible=True) as qa_input_group:
+                with gr.Group(visible=True) as chat_model_input_group:
+                    gr.Markdown("**通用对话** — 填写 `user_input`")
+                    test_chat_input = gr.Textbox(
+                        label="消息 (user_input)",
+                        lines=3,
+                        placeholder="例如：你好，介绍一下你自己",
+                    )
+
+                with gr.Group(visible=False) as image_gen_input_group:
+                    gr.Markdown("**文生图** — 填写生图描述")
+                    test_image_prompt = gr.Textbox(
+                        label="生图描述 (user_input)",
+                        lines=3,
+                        placeholder="例如：画一只在沙滩上的猫",
+                    )
+
+                with gr.Group(visible=False) as qa_input_group:
                     gr.Markdown("**知识问答** — 对应 `QaInput`")
                     test_question = gr.Textbox(
                         label="问题 (question)",
@@ -791,7 +875,14 @@ def create_gradio_demo() -> gr.Blocks:
                 test_agent.change(
                     switch_agent_input_form,
                     inputs=[test_agent],
-                    outputs=[qa_input_group, review_input_group, analyst_input_group],
+                    outputs=[
+                        qa_input_group,
+                        review_input_group,
+                        analyst_input_group,
+                        chat_model_input_group,
+                        image_gen_input_group,
+                        test_model,
+                    ],
                 )
                 test_run.click(
                     run_agent_test,
@@ -805,11 +896,19 @@ def create_gradio_demo() -> gr.Blocks:
                         test_context,
                         test_query,
                         test_data_source,
+                        test_chat_input,
+                        test_image_prompt,
                         test_output,
                     ],
                     outputs=[test_output],
                 )
                 test_clear.click(clear_agent_test_history, outputs=[test_output])
+
+                demo.load(
+                    refresh_ui_model_dropdowns,
+                    inputs=[test_agent, chat_model],
+                    outputs=[chat_model, test_model],
+                )
 
             # ── Workflow Tab：列表与单次测试 ──
             with gr.Tab("🔀 Workflow"):
@@ -856,7 +955,7 @@ def create_gradio_demo() -> gr.Blocks:
             with gr.Tab("🧠 Model"):
                 gr.Markdown("### 模型注册表")
                 model_headers = [
-                    "别名", "Provider", "Model ID", "Base URL",
+                    "别名", "中文名", "Provider", "Model ID", "凭证组", "Base URL",
                     "推理", "多模态", "文生图", "输入$/1M", "输出$/1M",
                 ]
                 model_table = gr.Dataframe(

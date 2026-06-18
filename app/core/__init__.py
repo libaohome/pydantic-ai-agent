@@ -13,14 +13,16 @@
         ├── __init__.py   ← 当前文件（包入口，定义公开 API）
         ├── config.py     ← 配置
         ├── deps.py       ← 依赖注入与数据库
-        ├── llm.py        ← LLM 管理
+        ├── llm_manager.py  ← LLM 管理
         └── observability.py  ← 可观测性
 
 ``__all__`` 列表声明「公开 API」：``from app.core import *`` 时只导出这些名称。
 """
 
+from __future__ import annotations
+
 from app.core.config import get_settings, AppSettings
-from app.core.llm import get_llm_manager, LlmManager, ModelAlias
+from app.core.llm_manager import get_llm_manager, LlmManager, ModelAlias
 from app.core.deps import AgentDeps, init_db, get_session
 from app.core.observability import setup_observability
 

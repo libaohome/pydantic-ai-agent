@@ -50,6 +50,7 @@ class WorkflowState:
     user_id: str = "user01"
     session_id: str = "session01"
     file_ids: list[str] = field(default_factory=list)
+    runtime_config: dict[str, Any] = field(default_factory=dict)
     analysis_result: str = ""
     review_result: str = ""
     qa_result: str = ""
@@ -65,6 +66,7 @@ def _agent_request(state: WorkflowState) -> AgentRunRequest:
         user_id=state.user_id,
         session_id=state.session_id,
         file_ids=state.file_ids,
+        runtime_config=state.runtime_config,
     )
 
 

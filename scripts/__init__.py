@@ -7,3 +7,5 @@ scripts 包 — 存放项目运维与启动脚本。
 当前主要脚本：
 - start.py — 环境检查、安装依赖、运行测试并启动 uvicorn
 """
+from __future__ import annotations
+

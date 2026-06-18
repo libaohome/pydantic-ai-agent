@@ -14,17 +14,23 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic_ai import Agent, RunContext
 
-from app.core.deps import AgentDeps
-from app.core.llm import get_llm_manager
+from app.core.deps import AgentDeps, RuntimeConfigKeys as RC
 from app.models.schemas import DataAnalysisOutput
+
+RUNTIME_CONFIG: dict[str, Any] = {
+    RC.NEEDS_DB_SESSION: True,
+    RC.USAGE_LIMITS: {"request_limit": 12, "tool_calls_limit": 8},
+}
 
 
 # ─── Agent 定义 ──────────────────────────────────
 
 data_analysis_agent = Agent[AgentDeps, DataAnalysisOutput](
-    model=get_llm_manager().resolve_model_string("deepseek-chat"),
+    model="deepseek:deepseek-chat",
     output_type=DataAnalysisOutput,
     deps_type=AgentDeps,
     retries=2,

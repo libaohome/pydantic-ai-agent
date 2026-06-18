@@ -11,6 +11,8 @@
 - 含 skill 名称或 QA 相关 → ``qa``
 """
 
+from __future__ import annotations
+
 import pytest
 from app.graphs.agent_router import (
     AnalyzeNode,

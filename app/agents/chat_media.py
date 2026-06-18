@@ -7,12 +7,10 @@ import mimetypes
 from pathlib import Path
 from typing import Any, TypeGuard
 
-import httpx
 from pydantic_ai.messages import BinaryContent, FilePart, ModelMessage, UserContent
 
-from app.core.config import get_settings
-from app.core.llm import MODEL_REGISTRY, ModelAlias, get_llm_manager
-from app.core.uploads import get_upload_store
+from app.core.llm_manager import ModelAlias, get_llm_manager
+from app.core.uploads import get_download_store, get_upload_store, guess_image_extension
 from app.models.schemas import ChatMediaArtifact, ChatModelOutput
 
 _TEXT_SUFFIXES = {
@@ -26,17 +24,30 @@ _AUDIO_SUFFIXES = {".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac"}
 
 
 def resolve_chat_model_alias(model_alias: str | None) -> ModelAlias:
-    if model_alias and model_alias in MODEL_REGISTRY:
-        return model_alias  # type: ignore[return-value]
-    return get_llm_manager()._default_alias()
+    llm = get_llm_manager()
+    if model_alias and llm.has_alias(model_alias):
+        return model_alias
+    return llm.default_alias()
 
 
 def supports_image_generation(alias: ModelAlias) -> bool:
-    return MODEL_REGISTRY[alias].image_generation
+    return get_llm_manager().get_config(alias).image_generation
 
 
 def supports_multimodal_input(alias: ModelAlias) -> bool:
-    return MODEL_REGISTRY[alias].multimodal
+    return get_llm_manager().get_config(alias).multimodal
+
+
+def resolve_agent_for_model_alias(model_alias: str | None) -> "AgentName":
+    """按模型能力选择 chat-model 或 image-gen Agent。"""
+    from app.agents.registry import AgentName
+
+    llm = get_llm_manager()
+    if model_alias and llm.has_alias(model_alias):
+        if supports_image_generation(model_alias):
+            return AgentName.image_gen
+        return AgentName.chat_model
+    return AgentName.chat_model
 
 
 def get_chat_builtin_tools(model_alias: str | None) -> list[Any]:
@@ -112,44 +123,6 @@ def build_chat_user_prompt(
 def _all_str_parts(parts: list[UserContent]) -> TypeGuard[list[str]]:
     return all(isinstance(p, str) for p in parts)
 
-async def run_sensenova_image_generation(
-    prompt: str,
-    *,
-    size: str = "2752x1536",
-) -> dict[str, Any]:
-    """调用商汤 images/generations 接口生图。"""
-    settings = get_settings()
-    base_url = settings.sensenova_base_url.rstrip("/")
-    headers = {
-        "Authorization": f"Bearer {settings.sensenova_api_key}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": "sensenova-u1-fast",
-        "prompt": prompt.strip() or "生成一张信息图",
-        "size": size,
-        "n": 1,
-    }
-
-    async with httpx.AsyncClient(timeout=180.0) as client:
-        resp = await client.post(f"{base_url}/images/generations", headers=headers, json=payload)
-        resp.raise_for_status()
-        data = resp.json()
-
-    image_url = data["data"][0]["url"]
-    store = get_upload_store()
-    async with httpx.AsyncClient(timeout=180.0) as client:
-        img_resp = await client.get(image_url)
-        img_resp.raise_for_status()
-        content_type = img_resp.headers.get("content-type", "image/png")
-        ext = mimetypes.guess_extension(content_type.split(";")[0].strip()) or ".png"
-        file_id = store.save_bytes(img_resp.content, f"generated{ext}")
-        path = str(store.get_path(file_id))
-
-    artifact = ChatMediaArtifact(kind="image", path=path, mime_type=content_type, file_id=file_id)
-    text = f"已根据描述生成图片（模型 sensenova-u1-fast）。\n\n原图 URL: {image_url}"
-    return ChatModelOutput(text=text, artifacts=[artifact]).model_dump()
-
 
 def serialize_chat_model_result(result: Any) -> dict[str, Any]:
     """从 Agent 运行结果提取文本与模型生成的媒体文件。"""
@@ -157,7 +130,7 @@ def serialize_chat_model_result(result: Any) -> dict[str, Any]:
 
     text = str(result.output or "").strip()
     artifacts: list[ChatMediaArtifact] = []
-    store = get_upload_store()
+    store = get_download_store()
 
     messages: list[ModelMessage] = []
     if hasattr(result, "new_messages"):
@@ -171,9 +144,20 @@ def serialize_chat_model_result(result: Any) -> dict[str, Any]:
             if not isinstance(content, BinaryContent):
                 continue
             mime = content.media_type or "application/octet-stream"
-            kind = "image" if mime.startswith("image/") else "file"
-            ext = mimetypes.guess_extension(mime) or ".bin"
-            file_id = store.save_bytes(content.data, f"generated{ext}")
+            ext = guess_image_extension(mime, content.data)
+            if ext:
+                kind = "image"
+                if mime == "application/octet-stream":
+                    mime = {
+                        ".png": "image/png",
+                        ".jpg": "image/jpeg",
+                        ".gif": "image/gif",
+                        ".webp": "image/webp",
+                    }.get(ext, "image/png")
+            else:
+                kind = "file"
+                ext = mimetypes.guess_extension(mime) or ".bin"
+            file_id = store.save_from_bytes(content.data, f"generated{ext}", mime_type=mime)
             path = str(store.get_path(file_id))
             artifacts.append(
                 ChatMediaArtifact(kind=kind, path=path, mime_type=mime, file_id=file_id)

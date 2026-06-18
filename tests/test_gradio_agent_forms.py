@@ -1,6 +1,8 @@
 """单元测试 — Gradio Agent 表单字段组装。"""
 
-from app.ui.agent_forms import build_agent_user_input
+from __future__ import annotations
+
+from app.ui.agent_forms import agent_form_visibility, build_agent_user_input
 
 
 def test_build_qa_input():
@@ -52,3 +54,26 @@ def test_build_data_analyst_input():
 def test_build_data_analyst_requires_query():
     _, err = build_agent_user_input("data-analyst", query="")
     assert err is not None
+
+
+def test_build_chat_model_input():
+    text, err = build_agent_user_input("chat-model", chat_input="你好")
+    assert err is None
+    assert text == "你好"
+
+
+def test_build_image_gen_input():
+    text, err = build_agent_user_input("image-gen", chat_input="画一只猫")
+    assert err is None
+    assert text == "画一只猫"
+
+
+def test_build_chat_model_requires_input():
+    _, err = build_agent_user_input("chat-model", chat_input="")
+    assert err is not None
+
+
+def test_agent_form_visibility():
+    assert agent_form_visibility("chat-model") == (False, False, False, True, False)
+    assert agent_form_visibility("image-gen") == (False, False, False, False, True)
+    assert agent_form_visibility("qa-assistant") == (True, False, False, False, False)

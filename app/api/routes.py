@@ -1,10 +1,12 @@
 """FastAPI 路由 — Agent / Workflow API 接口。"""
 
+from __future__ import annotations
+
 from fastapi import APIRouter
 
 from app.agents import AgentName, list_agents, run_agent
 from app.graphs import WorkflowName, list_workflows, run_workflow
-from app.core.llm import get_llm_manager
+from app.core.llm_manager import get_llm_manager
 from app.models.schemas import (
     AgentRunRequest,
     AgentRunResult,
@@ -25,10 +27,10 @@ async def list_capabilities():
 
 # ─── 通用 Agent 运行 ─────────────────────────────
 
-@router.post("/{name}/agent", response_model=AgentRunResult)
-async def run_agent_by_name(name: AgentName, body: AgentRunRequest) -> AgentRunResult:
+@router.post("/{agent_name}/agent", response_model=AgentRunResult)
+async def run_agent_by_name(agent_name: AgentName, body: AgentRunRequest) -> AgentRunResult:
     """通用 Agent 运行端点，返回统一的 success/error 信封结构。"""
-    return await run_agent(name, body)
+    return await run_agent(agent_name, body)
 
 
 # ─── 通用 Workflow 运行 ──────────────────────────

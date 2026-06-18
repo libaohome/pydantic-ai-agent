@@ -21,6 +21,7 @@ def build_agent_user_input(
     context: str = "",
     query: str = "",
     data_source: str = "",
+    chat_input: str = "",
 ) -> tuple[str, str | None]:
     """将各 Agent 的结构化字段组装为 ``user_input`` 文本。
 
@@ -63,13 +64,22 @@ def build_agent_user_input(
             return f"[领域: {inp.domain}]\n\n{inp.question}", None
         return inp.question, None
 
+    if agent_value in ("chat-model", "image-gen"):
+        text = chat_input.strip()
+        if not text:
+            label = "生图描述" if agent_value == "image-gen" else "消息"
+            return "", f"请填写{label}"
+        return text, None
+
     return "", f"未知 Agent: {agent_value}"
 
 
-def agent_form_visibility(agent_value: str) -> tuple[bool, bool, bool]:
-    """返回 (qa_visible, review_visible, analyst_visible)。"""
+def agent_form_visibility(agent_value: str) -> tuple[bool, bool, bool, bool, bool]:
+    """返回 (qa_visible, review_visible, analyst_visible, chat_model_visible, image_gen_visible)。"""
     return (
         agent_value == "qa-assistant",
         agent_value == "code-reviewer",
         agent_value == "data-analyst",
+        agent_value == "chat-model",
+        agent_value == "image-gen",
     )

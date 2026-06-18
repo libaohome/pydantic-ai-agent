@@ -1,5 +1,7 @@
 """单元测试 — 数据分析 Agent 防死循环与数据库会话。"""
 
+from __future__ import annotations
+
 import pytest
 from pydantic_ai.usage import UsageLimits
 

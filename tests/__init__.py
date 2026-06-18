@@ -7,3 +7,5 @@
 - 包 = 包含 ``__init__.py`` 的文件夹，可被 ``import`` 引用
 - 本文件可以为空，也可以放测试共用的工具函数；当前仅保留说明性 docstring
 """
+from __future__ import annotations
+

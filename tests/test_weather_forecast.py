@@ -1,5 +1,7 @@
 """单元测试 — 天气预报脚本（离线逻辑）。"""
 
+from __future__ import annotations
+
 from app.skills.weather.scripts.forecast import _looks_like_rain, get_forecast
 
 

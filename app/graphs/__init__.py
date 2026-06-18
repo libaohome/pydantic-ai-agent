@@ -1,5 +1,7 @@
 """图编排包 — Workflow 注册、定义与运行入口。"""
 
+from __future__ import annotations
+
 from app.graphs.agent_router import (
     AnalyzeNode,
     QaNode,

@@ -7,3 +7,5 @@
 - ``routes.py``：Agent 相关的 REST API 端点
 - 未来可在此包下新增其他路由模块（如健康检查、管理后台等）
 """
+from __future__ import annotations
+

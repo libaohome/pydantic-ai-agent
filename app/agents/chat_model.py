@@ -5,20 +5,26 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic_ai import Agent
 
-from app.core.deps import AgentDeps
-from app.core.llm import get_llm_manager
+from app.core.deps import AgentDeps, RuntimeConfigKeys as RC
+
+RUNTIME_CONFIG: dict[str, Any] = {
+    RC.PROMPT_BUILDER: "chat_media",
+    RC.OUTPUT_SERIALIZER: "chat_model",
+    RC.RESOLVE_DEFAULT_MODEL: True,
+}
 
 chat_model_agent = Agent[AgentDeps, str](
-    model=get_llm_manager().resolve_model_string("deepseek-chat"),
+    model="deepseek:deepseek-chat",
     output_type=str,
     deps_type=AgentDeps,
     instructions="""你是一个通用对话助手，只使用当前大模型本身的能力：
 
 1. **文本**：自然、清晰地回答用户问题。
 2. **附件**：文本类文件可结合内容作答；若当前模型支持多模态（如 sensenova-6.7-flash-lite），可理解图片。
-3. **生图**：若使用 sensenova-u1-fast，将根据文字描述生成图片。
 
 约束：
 - 不要使用 Skill、知识库检索、天气脚本或任何外部业务工具（你没有这些能力）。

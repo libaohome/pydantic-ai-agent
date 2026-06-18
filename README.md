@@ -51,15 +51,18 @@ pydantic-ai-agent/
 │   │   ├── config.py                 #   配置中心（pydantic-settings，自动 .env 加载）
 │   │   ├── llm.py                    #   LLM 管理器（8 模型预注册 + 成本追踪 + 动态切换）
 │   │   ├── deps.py                   #   依赖注入容器 + DB 会话管理
-│   │   ├── uploads.py                #   上传文件存储（file_id 元数据与读取）
+│   │   ├── uploads.py                #   上传/下载存储（upload 附件 + download 生成物）
 │   │   └── observability.py          #   Logfire 全链路追踪配置
 │   │
 │   ├── agents/                       # 🤖 Agent 层
 │   │   ├── code_reviewer.py          #   代码审查 Agent（结构化输出 CodeReviewOutput）
 │   │   ├── data_analyst.py           #   数据分析 Agent（SQL 工具链 + 图表生成）
 │   │   ├── qa_assistant.py           #   知识问答 Agent（KB / Web / Skills / 天气）
-│   │   ├── registry.py               #   Agent 注册表（AgentName + list_agents）
-│   │   ├── runner.py                 #   统一 Agent 执行入口 run_agent()
+│   │   ├── chat_model.py             #   通用对话 Agent（多模态 + 生图 + RUNTIME_CONFIG）
+│   │   ├── chat_media.py             #   多模态 prompt 构建、生图 API、输出序列化
+│   │   ├── run_context.py            #   AgentRunContext / PreRunResult（pre_run 钩子）
+│   │   ├── registry.py               #   Agent 注册表 + RUNTIME_CONFIG 汇总 + pre_run 钩子
+│   │   ├── runner.py                 #   通用 Agent 执行入口 run_agent()（读 runtime_config）
 │   │   └── input_files.py            #   附件预处理（file_id 注入 prompt）
 │   │
 │   ├── tools/                        # 🔧 工具层
@@ -139,7 +142,7 @@ pydantic-ai-agent/
 │                基础设施层                               │
 │  LlmManager (8模型路由) · Config (pydantic-settings)   │
 │  Logfire (全链路追踪) · SQLAlchemy (持久化)             │
-│  UploadStore (附件) · SecurityScanner · SkillManager   │
+│  UploadStore (upload/download) · SecurityScanner · SkillManager   │
 └──────────────────────────────────────────────────────┘
 ```
 
@@ -237,7 +240,7 @@ python -m app.main
 | `POST` | `/api/v1/agents/{workflow_name}/workflow` | 运行指定 Workflow |
 | `GET` | `/api/v1/agents/costs` | 成本追踪报告 |
 
-**Agent 名称**（`{name}`）：`code-reviewer` | `data-analyst` | `qa-assistant`
+**Agent 名称**（`{name}`）：`code-reviewer` | `data-analyst` | `qa-assistant` | `chat-model`
 
 **Workflow 名称**（`{workflow_name}`）：`agent-router`
 
@@ -252,11 +255,12 @@ python -m app.main
 | `user_id` | `str` | `user01` | 用户 ID |
 | `session_id` | `str` | `session01` | 会话 ID |
 | `model_alias` | `str \| null` | `null` | 可选模型别名 |
-| `file_ids` | `list[str]` | `[]` | 已上传文件 ID 列表 |
+| `file_ids` | `list[str]` | `[]` | 已上传文件 ID 列表（`data/upload`） |
+| `runtime_config` | `dict` | `{}` | 运行时配置（沙箱、能力开关等，见下文） |
 
 **`AgentRunResult`**（响应信封）：`status` 为 `success` 或 `error`；成功时 `output` 为各 Agent 的结构化输出，失败时 `error` 含错误信息；另含 `usage`、`cost_usd`、`elapsed_seconds`。
 
-**`WorkflowRunRequest`**：`user_input`、`tenant_id`、`user_id`、`session_id`、`file_ids`（字段含义同上）。
+**`WorkflowRunRequest`**：`user_input`、`tenant_id`、`user_id`、`session_id`、`file_ids`、`runtime_config`（字段含义同上）。
 
 **`WorkflowRunResult`**：`state` 含 `qa_result` / `review_result` / `analysis_result` 等分支结果摘要。
 
@@ -331,7 +335,7 @@ curl -X POST http://localhost:8000/api/v1/agents/qa-assistant/agent \
 
 ## LLM 管理器
 
-`app/core/llm.py` 提供统一的模型路由和成本追踪。
+`app/core/llm_manager.py` 提供统一的模型路由和成本追踪。
 
 ### 预注册模型
 
@@ -347,7 +351,7 @@ curl -X POST http://localhost:8000/api/v1/agents/qa-assistant/agent \
 ### 使用方式
 
 ```python
-from app.core.llm import get_llm_manager, ModelAlias
+from app.core.llm_manager import get_llm_manager, ModelAlias
 
 llm = get_llm_manager()
 
@@ -365,7 +369,7 @@ report = llm.get_cost_report()
 
 ### 添加自定义模型
 
-在 `app/core/llm.py` 的 `MODEL_REGISTRY` 字典中添加：
+在 SQLite `llm_models` 表中添加模型记录，或通过管理界面配置。核心加载逻辑见 `app/core/llm_registry.py`：
 
 ```python
 ModelAlias = Literal[
@@ -550,7 +554,9 @@ result = await agent.run('帮我审查这段代码')
 
 当前路由逻辑基于关键词匹配（适合快速验证），生产环境可替换为 LLM 意图分类。
 
-## 三个预构建 Agent
+**多模型 loop**：单次 `agent.run()` 仅绑定一个主模型（`request.model_alias`）。意图识别用小模型、推理用大模型、识图用多模态模型等场景，建议通过 **Workflow 多节点** 编排（各节点调用不同 Agent / `model_alias`），而非在 `runtime_config` 里堆多个 model 键。
+
+## 预构建 Agent
 
 所有 Agent 通过统一入口 `run_agent(AgentName, AgentRunRequest)` 执行（`app/agents/runner.py`），API 层与 Gradio 均调用此函数。
 
@@ -597,6 +603,16 @@ if result.is_success:
 | 工具 | `search_knowledge_base`, `web_search`, `get_weather_forecast`, Skills 工具集 |
 | 模型 | 默认 `deepseek-chat` |
 
+### ChatModel — 通用对话
+
+| 配置 | 值 |
+|------|---|
+| 名称 | `chat-model` |
+| 输入 | `user_input` + 可选附件（多模态模型可理解图片） |
+| 输出 | `ChatModelOutput`（text + artifacts[]） |
+| 特性 | `sensenova-u1-fast` 走生图 API 短路；生成物落盘 `data/download` |
+| 模型 | 默认跟随 `default_model`；可通过 `model_alias` 切换 |
+
 > `schemas.py` 中仍保留 `CodeReviewInput`、`DataAnalysisInput`、`QaInput` 等类型，供 Agent 的 `output_type` 与文档参考；**API 统一使用 `AgentRunRequest.user_input`** 传递输入。
 
 ## 依赖注入
@@ -615,6 +631,8 @@ async def my_tool(ctx: RunContext[AgentDeps], query: str) -> str:
     db = ctx.deps.db_session
     # 访问请求 ID
     request_id = ctx.deps.request_id
+    # 访问运行时配置（沙箱、能力开关等）
+    sandbox = ctx.deps.runtime_config.get("sandbox_root")
     ...
 ```
 
@@ -632,9 +650,120 @@ result = await run_agent(
         tenant_id="tenant01",
         user_id="user01",
         session_id="session01",
+        runtime_config={"sandbox_root": "/path/to/workspace"},
     ),
 )
 ```
+
+> 完整 `runtime_config` 约定与扩展规划见下文 **[Agent 运行时配置（runtime_config）](#agent-运行时配置runtime_config)**。
+
+---
+
+## Agent 运行时配置（runtime_config）
+
+复杂 Agent 能力（内置 tool、MCP、知识库、数据库、联网、Skill、读写文件、代码沙箱等）通过 **`AgentDeps.runtime_config`** 统一承载。外层 API / Chat / Workflow 传入的配置会与各 Agent 模块声明的默认值合并。
+
+### AgentDeps 主要字段
+
+| 字段 | 说明 |
+|------|------|
+| `tenant_id` / `user_id` / `session_id` | 多租户与会话标识 |
+| `meta_files` | 本次请求的上传附件元数据（`UploadedFileMeta` 列表） |
+| `runtime_config` | 运行时行为开关与资源定位（见下表） |
+| `db_session` | 可选 DB 会话（`needs_db_session` 为 true 时由 runner 注入） |
+
+### 文件存储目录
+
+| 目录 | 用途 |
+|------|------|
+| `data/upload` | 用户上传附件（API / Gradio 传入的 `file_ids`） |
+| `data/download` | Agent 生成物（生图、模型返回的 BinaryContent 等） |
+
+### RuntimeConfigKeys（runner 管线，已实现）
+
+定义于 `app/core/deps.py`，由 `runner.py` 读取，**不依赖 `agent_name` 分支**：
+
+| 键 | 说明 | 典型声明位置 |
+|----|------|-------------|
+| `sandbox_root` | 沙箱根目录，限制 `read_file` / `write_file` / `run_shell` | 外层 API 传入 |
+| `needs_db_session` | 是否在 DB 会话中执行 `agent.run()` | `data_analyst.RUNTIME_CONFIG` |
+| `usage_limits` | pydantic-ai 用量限制 | `data_analyst.RUNTIME_CONFIG` |
+| `prompt_builder` | `standard` / `chat_media` | `chat_model.RUNTIME_CONFIG` |
+| `output_serializer` | `default` / `chat_model` | `chat_model.RUNTIME_CONFIG` |
+| `resolve_default_model` | 是否解析 chat 默认模型别名 | `chat_model.RUNTIME_CONFIG` |
+
+各 Agent 在自身模块声明 `RUNTIME_CONFIG = {...}`，`registry.py` 汇总为 `AGENT_RUNTIME_CONFIGS`；`code_reviewer` / `qa_assistant` 使用空 `{}` 表示 runner 默认行为。
+
+### pre_run 钩子（生图等短路路径）
+
+`chat_model.pre_run_hook` 在 `agent.run()` 之前执行（如 `sensenova-u1-fast` 直接调生图 API）。返回 `PreRunResult` 则跳过后续 LLM 调用；返回 `None` 则走正常流程。注册表：`registry.AGENT_PRE_RUN_HOOKS`。
+
+生图 API 响应兼容 OpenAI 风格 **`url`**、**`b64_json`** 及 **`data:` URI**，统一落盘 `data/download` 后返回 `ChatModelOutput`。
+
+### capabilities 能力开关（规划，尚未实现）
+
+后续通过 API / Chat 对外提供复杂 Agent 时，建议在 `runtime_config` 下增加 **`capabilities`** 分组（避免为每个能力单独占顶层键）。工具 / MCP / Skill 实现侧读取 `ctx.deps.runtime_config["capabilities"]` 决定是否执行。
+
+| 子键 | 用途 |
+|------|------|
+| `knowledge_base` | KB 开关、`collection_id`、`top_k` 等 |
+| `web_search` | 联网搜索开关与参数 |
+| `database` | 数据库工具开关 |
+| `mcp` | 启用的 MCP server 列表 |
+| `skills` | Skill 开关与 `allowlist` |
+| `filesystem` | 沙箱路径、允许的内置文件工具 |
+| `builtin_tools` | 如 `read_file`、`write_file`、`run_shell` |
+
+请求示例（规划 schema）：
+
+```json
+{
+  "user_input": "根据产品文档回答并生成报告",
+  "runtime_config": {
+    "capabilities": {
+      "knowledge_base": {
+        "enabled": true,
+        "collection_id": "product-docs",
+        "top_k": 5
+      },
+      "web_search": { "enabled": true, "max_results": 5 },
+      "database": { "enabled": true },
+      "mcp": { "servers": ["weather", "gaode-map"] },
+      "skills": { "enabled": true, "allowlist": ["weather", "code-review"] },
+      "filesystem": { "sandbox_root": "/tmp/workspace" },
+      "builtin_tools": ["read_file", "write_file", "run_shell"]
+    }
+  }
+}
+```
+
+### 能力分层与当前接入状态
+
+```
+API / Chat 请求
+    runtime_config.capabilities   ← 本次请求启用哪些能力、用哪个 KB 集合（规划）
+         ↓
+Workflow 节点                    ← 多模型、多阶段编排（推荐）
+         ↓
+Agent + 工具 / MCP / Skill         ← 读 ctx.deps.runtime_config 决定是否执行
+```
+
+| 能力 | 当前状态 | 配置方式 |
+|------|----------|----------|
+| 内置 tool（文件/Shell） | 部分 Agent 已挂载 | `sandbox_root`；规划 `capabilities.filesystem` |
+| 数据库 | `data-analyst` | `needs_db_session` |
+| 知识库 / 联网 | `qa-assistant` 工具（mock） | 规划 `capabilities.knowledge_base` / `web_search` |
+| Skill | `qa-assistant` capabilities | 规划 `capabilities.skills` |
+| MCP | 有示例 server，未接入 Agent | 规划 `capabilities.mcp` |
+| 生图 | `chat-model` + `pre_run_hook` | 模型别名 `sensenova-u1-fast` |
+| 多模型 loop | 未在单 Agent 内实现 | **Workflow 多节点**（各节点不同 Agent / model_alias） |
+
+### 扩展新 Agent 的检查清单
+
+1. 在 `app/agents/<name>.py` 定义 Agent、`RUNTIME_CONFIG`、可选 `pre_run_hook`
+2. 在 `registry.py` 注册 `AGENTS`、`AGENT_RUNTIME_CONFIGS`、`AGENT_PRE_RUN_HOOKS`
+3. 工具内通过 `ctx.deps.runtime_config` 读取沙箱与（未来的）`capabilities`
+4. 多模型 / 多阶段编排优先放在 Workflow，而非扩展 runner 的 `agent_name` 分支
 
 ---
 
@@ -794,7 +923,7 @@ curl -X POST http://localhost:8000/api/v1/skills/upload \
 
 ### 添加新 LLM 模型
 
-在 `app/core/llm.py` 的 `ModelAlias` 和 `MODEL_REGISTRY` 中添加条目即可。参见 [LLM 管理器](#llm-管理器) 章节。
+在 `llm_models` 表中添加条目即可。参见 [LLM 管理器](#llm-管理器) 章节。
 
 ---
 
@@ -886,7 +1015,9 @@ result = agent.run_sync('test input')  # 不调用真实 LLM
 | `app/main.py` | 程序入口，挂载 `/api/v1` 路由与 `/ui` Gradio |
 | `app/core/config.py` | 配置读取 |
 | `app/agents/registry.py` | Agent 注册表 |
-| `app/agents/runner.py` | 统一 Agent 执行 `run_agent()` |
+| `app/agents/runner.py` | 通用 Agent 执行 `run_agent()`（读 `runtime_config`） |
+| `app/agents/run_context.py` | `AgentRunContext` / `PreRunResult` |
+| `app/core/deps.py` | `AgentDeps` + `RuntimeConfigKeys` |
 | `app/api/routes.py` | REST API 端点 |
 | `app/graphs/agent_router.py` | agent-router 工作流图 |
 | `app/graphs/runner.py` | 统一 Workflow 执行 `run_workflow()` |

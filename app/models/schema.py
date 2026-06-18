@@ -10,6 +10,7 @@
     - ``Base``：所有 ORM 类的声明式基类
     - ``Conversation``：Agent 对话与 token 成本记录
     - ``ToolExecutionLog``：Agent 工具调用的审计日志
+    - ``LlmCredentialGroup`` / ``LlmModel``：LLM 模型注册表（由 ``LlmManager`` 加载）
 
 在项目中的位置::
 
@@ -110,3 +111,42 @@ class ToolExecutionLog(Base):
     duration_ms: Mapped[int] = mapped_column(Integer, nullable=True)
     success: Mapped[bool] = mapped_column(default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class LlmCredentialGroup(Base):
+    """LLM 凭证组 — api_key / base_url 存于 SQLite，不再依赖 .env。"""
+
+    __tablename__ = "llm_credential_groups"
+
+    group_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    group_name: Mapped[str] = mapped_column(String(128), default="")
+    api_key: Mapped[str] = mapped_column(Text, default="")
+    base_url: Mapped[str] = mapped_column(Text, default="")
+    enabled: Mapped[bool] = mapped_column(default=True)
+    create_time: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    update_time: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
+class LlmModel(Base):
+    """LLM 模型注册表 — 运行时由 LlmManager 加载。"""
+
+    __tablename__ = "llm_models"
+
+    alias: Mapped[str] = mapped_column(String(128), primary_key=True)
+    model_name: Mapped[str] = mapped_column(String(128), default="")
+    provider: Mapped[str] = mapped_column(String(32))
+    model_id: Mapped[str] = mapped_column(String(256))
+    credential_group_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    reasoning: Mapped[bool] = mapped_column(default=False)
+    multimodal: Mapped[bool] = mapped_column(default=False)
+    image_generation: Mapped[bool] = mapped_column(default=False)
+    cost_per_1m_input: Mapped[float] = mapped_column(Float, default=0.0)
+    cost_per_1m_output: Mapped[float] = mapped_column(Float, default=0.0)
+    enabled: Mapped[bool] = mapped_column(default=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    create_time: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    update_time: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )

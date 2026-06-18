@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 #!/usr/bin/env python3
 """
 图像伪造 / 篡改检测脚本（image-forgery-detector Skill）。

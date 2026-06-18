@@ -14,18 +14,22 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic_ai import Agent, RunContext
 
 from app.core.deps import AgentDeps
-from app.core.llm import get_llm_manager
 from app.models.schemas import QaOutput
 from app.skills.integration import create_skills_capability
+
+# 使用 runner 默认行为：standard prompt、结构化 output 序列化、无 DB 会话
+RUNTIME_CONFIG: dict[str, Any] = {}
 
 
 # ─── Agent 定义 ──────────────────────────────────
 
-qa_agent = Agent[AgentDeps, QaOutput](
-    model=get_llm_manager().resolve_model_string("deepseek-chat"),
+qa_assistant_agent = Agent[AgentDeps, QaOutput](
+    model="deepseek:deepseek-chat",
     output_type=QaOutput,
     deps_type=AgentDeps,
     retries=2,
@@ -61,7 +65,7 @@ qa_agent = Agent[AgentDeps, QaOutput](
 
 # ─── 注册工具 ──────────────────────────────────
 
-@qa_agent.tool
+@qa_assistant_agent.tool
 async def get_weather_forecast(
     ctx: RunContext[AgentDeps],
     city: str,
@@ -89,7 +93,7 @@ async def get_weather_forecast(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@qa_agent.tool
+@qa_assistant_agent.tool
 async def search_kb(ctx: RunContext[AgentDeps], query: str, top_k: int = 5) -> str:
     """搜索内部知识库。
 
@@ -105,7 +109,7 @@ async def search_kb(ctx: RunContext[AgentDeps], query: str, top_k: int = 5) -> s
     return await search_knowledge_base(ctx, query, top_k)
 
 
-@qa_agent.tool
+@qa_assistant_agent.tool
 async def search_internet(ctx: RunContext[AgentDeps], query: str) -> str:
     """搜索互联网以补充知识库未覆盖的信息。
 

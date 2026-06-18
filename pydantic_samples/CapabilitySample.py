@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from pydantic_ai import Agent
 from pydantic_ai.capabilities import Thinking, WebSearch
 

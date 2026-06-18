@@ -51,6 +51,10 @@ class AgentRunRequest(BaseModel):
     session_id: str = Field(default="session01", description="会话 ID")
     model_alias: str | None = Field(default=None, description="可选模型别名")
     file_ids: list[str] = Field(default_factory=list, description="上传文件 ID 列表")
+    runtime_config: dict[str, Any] = Field(
+        default_factory=dict,
+        description="运行时配置，如 sandbox_root 沙箱根目录",
+    )
 
 
 class TokenUsage(BaseModel):
@@ -104,6 +108,10 @@ class WorkflowRunRequest(BaseModel):
     user_id: str = Field(default="user01", description="用户 ID")
     session_id: str = Field(default="session01", description="会话 ID")
     file_ids: list[str] = Field(default_factory=list, description="上传文件 ID 列表")
+    runtime_config: dict[str, Any] = Field(
+        default_factory=dict,
+        description="运行时配置，如 sandbox_root 沙箱根目录",
+    )
 
 
 class WorkflowStateSnapshot(BaseModel):

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from pydantic_ai import Agent
 agent = Agent(  
   'deepseek:deepseek-chat',
